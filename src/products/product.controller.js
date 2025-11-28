@@ -10,7 +10,7 @@ const getAllProducts = async (req, res) => {
       sort = 'createdAt', 
       order = 'desc',
       page = 1,
-      limit = 100 // 🔥 Tăng limit để lấy nhiều products
+      limit = 100
     } = req.query;
 
     let query = { isActive: true };
@@ -37,7 +37,7 @@ const getAllProducts = async (req, res) => {
 
     const total = await Product.countDocuments(query);
 
-    console.log(`📦 Found ${products.length} products`);
+    console.log(`📦 Found ${products.length} products (Total: ${total})`);
 
     res.json({
       success: true,
@@ -60,21 +60,28 @@ const getAllProducts = async (req, res) => {
 // Get single product
 const getProductById = async (req, res) => {
   try {
+    console.log('🔍 Getting product by ID:', req.params.id);
+    
     let product = null;
     
     // Tìm theo productId hoặc _id
     if (!isNaN(req.params.id)) {
+      console.log('  → Searching by productId (number)');
       product = await Product.findOne({ productId: parseInt(req.params.id) });
     } else {
+      console.log('  → Searching by _id (ObjectId)');
       product = await Product.findById(req.params.id);
     }
 
     if (!product) {
+      console.log('❌ Product not found');
       return res.status(404).json({ 
         success: false, 
         message: 'Không tìm thấy sản phẩm' 
       });
     }
+
+    console.log('✅ Product found:', product.name);
 
     res.json({
       success: true,
@@ -92,7 +99,8 @@ const getProductById = async (req, res) => {
 // Create product (Admin)
 const createProduct = async (req, res) => {
   try {
-    console.log('📦 Creating product:', req.body);
+    console.log('📦 Creating product:', req.body.name);
+    console.log('👤 Admin ID:', req.userId);
 
     // Kiểm tra productId đã tồn tại chưa
     if (req.body.productId) {
@@ -101,6 +109,7 @@ const createProduct = async (req, res) => {
       });
       
       if (existingProduct) {
+        console.log('❌ Product ID already exists:', req.body.productId);
         return res.status(400).json({
           success: false,
           message: 'Product ID đã tồn tại'
@@ -111,7 +120,10 @@ const createProduct = async (req, res) => {
     const newProduct = new Product(req.body);
     await newProduct.save();
 
-    console.log('✅ Product created:', newProduct._id);
+    console.log('✅ Product created successfully');
+    console.log('   _id:', newProduct._id);
+    console.log('   productId:', newProduct.productId);
+    console.log('   name:', newProduct.name);
 
     res.status(201).json({
       success: true,
@@ -130,16 +142,22 @@ const createProduct = async (req, res) => {
 // Update product (Admin)
 const updateProduct = async (req, res) => {
   try {
+    console.log('📝 Updating product:', req.params.id);
+    console.log('👤 Admin ID:', req.userId);
+    console.log('📋 Update data:', req.body);
+    
     let product = null;
     
     // Tìm theo productId hoặc _id
     if (!isNaN(req.params.id)) {
+      console.log('  → Updating by productId (number)');
       product = await Product.findOneAndUpdate(
         { productId: parseInt(req.params.id) },
         req.body,
         { new: true, runValidators: true }
       );
     } else {
+      console.log('  → Updating by _id (ObjectId)');
       product = await Product.findByIdAndUpdate(
         req.params.id,
         req.body,
@@ -148,13 +166,14 @@ const updateProduct = async (req, res) => {
     }
 
     if (!product) {
+      console.log('❌ Product not found for update');
       return res.status(404).json({ 
         success: false, 
         message: 'Không tìm thấy sản phẩm' 
       });
     }
 
-    console.log('✅ Product updated:', product._id);
+    console.log('✅ Product updated successfully:', product.name);
 
     res.json({
       success: true,
@@ -173,35 +192,62 @@ const updateProduct = async (req, res) => {
 // Delete product (Admin)
 const deleteProduct = async (req, res) => {
   try {
+    console.log('🗑️  DELETE Request received');
+    console.log('📋 Product ID:', req.params.id);
+    console.log('👤 Admin ID:', req.userId, '| Role:', req.role);
+    
     let product = null;
     
     // Tìm theo productId hoặc _id
     if (!isNaN(req.params.id)) {
+      console.log('🔍 Searching by productId (number):', parseInt(req.params.id));
+      
+      // First check if exists
+      const checkProduct = await Product.findOne({ productId: parseInt(req.params.id) });
+      console.log('  → Product exists before delete:', !!checkProduct);
+      
       product = await Product.findOneAndDelete({ 
         productId: parseInt(req.params.id) 
       });
     } else {
+      console.log('🔍 Searching by _id (ObjectId):', req.params.id);
+      
+      // First check if exists
+      const checkProduct = await Product.findById(req.params.id);
+      console.log('  → Product exists before delete:', !!checkProduct);
+      
       product = await Product.findByIdAndDelete(req.params.id);
     }
 
     if (!product) {
+      console.log('❌ Product not found in database');
       return res.status(404).json({ 
         success: false, 
-        message: 'Không tìm thấy sản phẩm' 
+        message: 'Không tìm thấy sản phẩm để xóa' 
       });
     }
 
-    console.log('✅ Product deleted:', product._id);
+    console.log('✅ Product DELETED from MongoDB successfully!');
+    console.log('   _id:', product._id);
+    console.log('   productId:', product.productId);
+    console.log('   name:', product.name);
+    console.log('   category:', product.category);
 
     res.json({
       success: true,
-      message: 'Xóa sản phẩm thành công'
+      message: 'Xóa sản phẩm thành công',
+      deletedProduct: {
+        _id: product._id,
+        productId: product.productId,
+        name: product.name
+      }
     });
   } catch (error) {
     console.error('❌ Delete product error:', error);
+    console.error('   Stack:', error.stack);
     res.status(500).json({ 
       success: false, 
-      message: 'Lỗi khi xóa sản phẩm' 
+      message: 'Lỗi khi xóa sản phẩm: ' + error.message
     });
   }
 };
@@ -209,6 +255,8 @@ const deleteProduct = async (req, res) => {
 // Get related products
 const getRelatedProducts = async (req, res) => {
   try {
+    console.log('🔗 Getting related products for:', req.params.id);
+    
     let product = null;
     
     if (!isNaN(req.params.id)) {
@@ -218,6 +266,7 @@ const getRelatedProducts = async (req, res) => {
     }
     
     if (!product) {
+      console.log('❌ Base product not found for related search');
       return res.status(404).json({ 
         success: false, 
         message: 'Không tìm thấy sản phẩm' 
@@ -229,6 +278,8 @@ const getRelatedProducts = async (req, res) => {
       _id: { $ne: product._id },
       isActive: true
     }).limit(4);
+
+    console.log(`✅ Found ${relatedProducts.length} related products in category: ${product.category}`);
 
     res.json({
       success: true,
