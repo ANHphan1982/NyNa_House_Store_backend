@@ -13,7 +13,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // CORS Configuration
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://ny-na-house-store-frontend.vercel.app/'],
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://ny-na-house-store-frontend.vercel.app/','https://nyna-house-store-backend-3.onrender.com/'],
   credentials: true
 }));
 
