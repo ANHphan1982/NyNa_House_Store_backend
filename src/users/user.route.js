@@ -73,7 +73,7 @@ router.post('/admin/login', async (req, res) => {
 
     // Send OTP via email
     try {
-      await sendOTPEmail(user.email, otp, user.username || user.email);
+      await sendOTPEmail(user.email, otp, user.username || user.email.split('@')[0]);
       console.log('✅ OTP email sent successfully');
     } catch (emailError) {
       console.error('❌ Email sending failed:', emailError);
@@ -84,14 +84,17 @@ router.post('/admin/login', async (req, res) => {
       });
     }
 
-    // Return success (không trả về token ngay)
-    res.json({
+    // 🔥 RESPONSE với requireOTP flag
+    const responseData = {
       success: true,
       message: 'Mã xác thực đã được gửi đến email của bạn',
       requireOTP: true,
       email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3'), // Mask email
       expiresIn: 300 // 5 minutes in seconds
-    });
+    };
+
+    console.log('📤 Sending response:', responseData);
+    res.json(responseData);
 
   } catch (error) {
     console.error('❌ Admin login error:', error);
@@ -181,18 +184,27 @@ router.post('/admin/verify-otp', async (req, res) => {
 
     console.log('✅ Token generated for:', user.email);
 
-    // Return token và user info
-    res.json({
+    // 🔥 ĐẢMBẢO USER OBJECT ĐẦY ĐỦ VỚI FIELD "name"
+    const userObject = {
+      id: user._id.toString(),
+      _id: user._id.toString(),
+      username: user.username || user.email.split('@')[0],
+      email: user.email,
+      phone: user.phone || '',
+      role: user.role,
+      name: user.name || user.username || user.email.split('@')[0] // 🔥 CRITICAL: Add name field
+    };
+
+    const responseData = {
       success: true,
       message: 'Đăng nhập thành công',
       token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role
-      }
-    });
+      user: userObject
+    };
+
+    console.log('📤 Sending verify-otp response with user:', userObject);
+
+    res.json(responseData);
 
   } catch (error) {
     console.error('❌ OTP verification error:', error);
@@ -259,7 +271,7 @@ router.post('/admin/resend-otp', async (req, res) => {
     });
 
     // Send email
-    await sendOTPEmail(user.email, otp, user.username || user.email);
+    await sendOTPEmail(user.email, otp, user.username || user.email.split('@')[0]);
 
     console.log('✅ OTP resent successfully');
 
