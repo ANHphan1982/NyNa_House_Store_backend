@@ -86,12 +86,18 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// 🔥 USER REGISTER
+// 🔥 USER REGISTER - FIX VALIDATION
 router.post('/register', async (req, res) => {
   try {
     const { name, phone, password, email } = req.body;
 
     console.log('📝 Register attempt:', phone || email);
+    console.log('📦 Request body:', { 
+      name, 
+      phone: phone || 'N/A', 
+      email: email || 'N/A',
+      hasPassword: !!password 
+    });
 
     // Validate required fields
     if (!name || !password) {
@@ -108,36 +114,78 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [
-        { email: email },
-        { phone: phone }
-      ]
-    });
+    // 🔥 FIX: Chỉ check field nào có value thực sự
+    const checkConditions = [];
+    
+    if (email && email.trim() && email.trim() !== '') {
+      checkConditions.push({ email: email.trim().toLowerCase() });
+    }
+    
+    if (phone && phone.trim() && phone.trim() !== '') {
+      checkConditions.push({ phone: phone.trim() });
+    }
 
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email hoặc số điện thoại đã được đăng ký'
+    console.log('🔍 Checking existing user with conditions:', checkConditions);
+
+    // Check if user already exists - CHỈ check nếu có conditions
+    let existingUser = null;
+    if (checkConditions.length > 0) {
+      existingUser = await User.findOne({
+        $or: checkConditions
       });
     }
 
+    if (existingUser) {
+      console.log('❌ User already exists:', {
+        id: existingUser._id,
+        email: existingUser.email,
+        phone: existingUser.phone
+      });
+      
+      // Determine which field is duplicated
+      let duplicateField = '';
+      if (existingUser.email === email?.trim().toLowerCase()) {
+        duplicateField = 'Email';
+      } else if (existingUser.phone === phone?.trim()) {
+        duplicateField = 'Số điện thoại';
+      } else {
+        duplicateField = 'Email hoặc số điện thoại';
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: `${duplicateField} đã được đăng ký`
+      });
+    }
+
+    console.log('✅ No existing user found, creating new user...');
+
+    // 🔥 Tạo email temp với timestamp để đảm bảo unique
+    const userEmail = email && email.trim() && email.trim() !== ''
+      ? email.trim().toLowerCase()
+      : `user_${phone}_${Date.now()}@temp.local`;
+
+    const userPhone = phone && phone.trim() && phone.trim() !== ''
+      ? phone.trim()
+      : null;
+
+    console.log('📧 User email:', userEmail);
+    console.log('📱 User phone:', userPhone);
+
     // Create new user
     const user = new User({
-      name,
-      username: name,
-      email: email || `${phone}@temp.local`,
-      phone: phone || '',
+      name: name.trim(),
+      email: userEmail,
+      phone: userPhone,
       password,
       role: 'user',
-      registerType: phone ? 'phone' : 'email',
+      registerType: phone && phone.trim() ? 'phone' : 'email',
       isActive: true
     });
 
     await user.save();
 
-    console.log('✅ User registered successfully');
+    console.log('✅ User registered successfully:', user._id);
 
     // Generate token
     const token = jwt.sign(
@@ -154,12 +202,14 @@ router.post('/register', async (req, res) => {
     const userObject = {
       id: user._id.toString(),
       _id: user._id.toString(),
-      username: user.username || user.name,
+      username: user.name,
       email: user.email,
-      phone: user.phone,
+      phone: user.phone || '',
       role: user.role,
       name: user.name
     };
+
+    console.log('📤 Sending response with user:', userObject);
 
     res.status(201).json({
       success: true,
@@ -170,6 +220,32 @@ router.post('/register', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Register error:', error);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    
+    // 🔥 Check for MongoDB duplicate key error
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern || {})[0];
+      const fieldName = field === 'email' ? 'Email' : field === 'phone' ? 'Số điện thoại' : 'Thông tin';
+      
+      console.error('❌ Duplicate key error on field:', field);
+      
+      return res.status(400).json({
+        success: false,
+        message: `${fieldName} đã được đăng ký`
+      });
+    }
+    
+    // 🔥 Check for validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: messages.join(', ')
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Lỗi server. Vui lòng thử lại sau.'
@@ -456,6 +532,67 @@ router.post('/admin/resend-otp', async (req, res) => {
       success: false,
       message: 'Không thể gửi lại mã. Vui lòng thử lại sau.'
     });
+  }
+});
+
+// 🔍 DEBUG ROUTES (Xóa sau khi test xong)
+router.get('/debug/check-phone/:phone', async (req, res) => {
+  try {
+    const { phone } = req.params;
+    console.log('🔍 Checking phone:', phone);
+    
+    const user = await User.findOne({ phone: phone });
+    
+    res.json({
+      exists: !!user,
+      user: user ? {
+        id: user._id,
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
+        createdAt: user.createdAt
+      } : null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/debug/check-email/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    console.log('🔍 Checking email:', email);
+    
+    const user = await User.findOne({ email: email.toLowerCase() });
+    
+    res.json({
+      exists: !!user,
+      user: user ? {
+        id: user._id,
+        name: user.name,
+        phone: user.phone,
+        email: user.email,
+        createdAt: user.createdAt
+      } : null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/debug/users', async (req, res) => {
+  try {
+    const users = await User.find({})
+      .select('name email phone role createdAt')
+      .sort({ createdAt: -1 })
+      .limit(20);
+    
+    res.json({
+      count: users.length,
+      users
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
