@@ -6,28 +6,36 @@ const Product = require('../products/product.model');
 const createOrder = async (req, res) => {
   try {
     const { 
-      items, 
+      products,      // 🔥 Frontend gửi "products"
+      items,         // 🔥 Fallback cho "items"
       shippingAddress, 
       paymentMethod, 
-      note,
+      notes,         // 🔥 Frontend gửi "notes"
+      note,          // 🔥 Fallback cho "note"
       subtotal,
       shippingFee, 
       totalAmount 
     } = req.body;
 
     console.log('📦 Creating order for user:', req.userId);
-    console.log('📦 Items:', JSON.stringify(items, null, 2));
+    console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
+
+    // 🔥 FIX: Accept both "products" and "items"
+    const orderItems = products || items;
 
     // Validate items
-    if (!items || items.length === 0) {
+    if (!orderItems || orderItems.length === 0) {
+      console.log('❌ No items in order');
       return res.status(400).json({ 
         success: false, 
         message: 'Đơn hàng phải có ít nhất 1 sản phẩm' 
       });
     }
 
+    console.log('✅ Order has', orderItems.length, 'items');
+
     // Validate shipping address
-    if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.phone) {
+    if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.phone || !shippingAddress.address) {
       return res.status(400).json({ 
         success: false, 
         message: 'Thiếu thông tin địa chỉ giao hàng' 
@@ -36,9 +44,12 @@ const createOrder = async (req, res) => {
 
     // 🔥 BƯỚC 1: KIỂM TRA VÀ LẤY THÔNG TIN PRODUCTS
     const productChecks = [];
+    const validatedItems = [];
     
-    for (let item of items) {
-      console.log(`🔍 Looking for product: ${item.name} (ID: ${item.productId})`);
+    for (let i = 0; i < orderItems.length; i++) {
+      const item = orderItems[i];
+      
+      console.log(`🔍 Processing item ${i}:`, JSON.stringify(item, null, 2));
       
       // 🔥 TÌM THEO NHIỀU CÁCH
       let product = null;
@@ -47,25 +58,25 @@ const createOrder = async (req, res) => {
       if (item.productId) {
         product = await Product.findOne({ productId: item.productId });
         if (product) {
-          console.log(`✅ Found by productId: ${item.productId}`);
+          console.log(`✅ Found by productId: ${item.productId} -> ${product.name}`);
         }
       }
       
       // Cách 2: Nếu không tìm thấy, tìm theo tên chính xác
-      if (!product) {
+      if (!product && item.name) {
         product = await Product.findOne({ 
           name: item.name,
           isActive: true
         });
         if (product) {
-          console.log(`✅ Found by name: ${item.name}`);
+          console.log(`✅ Found by exact name: ${item.name}`);
         }
       }
       
       // Cách 3: Nếu vẫn không có, tìm theo tên gần giống
-      if (!product) {
+      if (!product && item.name) {
         product = await Product.findOne({ 
-          name: { $regex: item.name, $options: 'i' },
+          name: { $regex: new RegExp(item.name, 'i') },
           isActive: true
         });
         if (product) {
@@ -74,15 +85,15 @@ const createOrder = async (req, res) => {
       }
 
       if (!product) {
-        console.log(`❌ Product not found: ${item.name}`);
+        console.log(`❌ Product not found:`, item);
         return res.status(404).json({
           success: false,
-          message: `Không tìm thấy sản phẩm: ${item.name}. Vui lòng thử lại sau.`
+          message: `Không tìm thấy sản phẩm: ${item.name || item.productId}. Vui lòng thử lại sau.`
         });
       }
 
       // Kiểm tra stock
-      if (product.stock < item.quantity) {
+      if (product.stock !== undefined && product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
           message: `Sản phẩm "${product.name}" chỉ còn ${product.stock} trong kho, bạn đang đặt ${item.quantity}`
@@ -93,20 +104,56 @@ const createOrder = async (req, res) => {
         product: product,
         quantity: item.quantity
       });
+
+      // 🔥 CREATE validated item với đầy đủ thông tin
+      validatedItems.push({
+        productId: product.productId || item.productId,
+        name: product.name,
+        quantity: item.quantity,
+        price: item.price || product.price,
+        size: item.selectedSize || item.size || null,
+        image: product.image || item.image
+      });
     }
 
-    console.log('✅ All products available, creating order...');
+    console.log('✅ All products validated');
+    console.log('📦 Validated items:', JSON.stringify(validatedItems, null, 2));
+
+    // 🔥 FIX: Normalize paymentMethod to uppercase
+    const normalizedPaymentMethod = (paymentMethod || 'cod').toUpperCase();
+    
+    // Validate payment method
+    const validMethods = ['COD', 'BANK', 'CARD', 'MOMO', 'ZALOPAY'];
+    if (!validMethods.includes(normalizedPaymentMethod)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phương thức thanh toán không hợp lệ'
+      });
+    }
+
+    // 🔥 Calculate totals if not provided
+    const calculatedSubtotal = subtotal || validatedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const calculatedShippingFee = shippingFee !== undefined ? shippingFee : 30000;
+    const calculatedTotal = totalAmount || (calculatedSubtotal + calculatedShippingFee);
 
     // 🔥 BƯỚC 2: TẠO ORDER
     const newOrder = new Order({
       userId: req.userId,
-      items,
-      shippingAddress,
-      paymentMethod,
-      note,
-      subtotal,
-      shippingFee,
-      totalAmount
+      items: validatedItems,
+      shippingAddress: {
+        fullName: shippingAddress.fullName,
+        phone: shippingAddress.phone,
+        email: shippingAddress.email || '',
+        address: shippingAddress.address,
+        ward: shippingAddress.ward || 'N/A',
+        district: shippingAddress.district || 'N/A',
+        city: shippingAddress.city || 'N/A'
+      },
+      paymentMethod: normalizedPaymentMethod,
+      note: notes || note || '',
+      subtotal: calculatedSubtotal,
+      shippingFee: calculatedShippingFee,
+      totalAmount: calculatedTotal
     });
 
     await newOrder.save();
@@ -115,17 +162,19 @@ const createOrder = async (req, res) => {
     for (let check of productChecks) {
       const oldStock = check.product.stock;
       
-      await Product.findByIdAndUpdate(
-        check.product._id,
-        {
-          $inc: { 
-            stock: -check.quantity,
-            soldCount: check.quantity
+      if (oldStock !== undefined) {
+        await Product.findByIdAndUpdate(
+          check.product._id,
+          {
+            $inc: { 
+              stock: -check.quantity,
+              soldCount: check.quantity
+            }
           }
-        }
-      );
-      
-      console.log(`📉 ${check.product.name}: ${oldStock} → ${oldStock - check.quantity}`);
+        );
+        
+        console.log(`📉 ${check.product.name}: ${oldStock} → ${oldStock - check.quantity}`);
+      }
     }
 
     console.log('✅ Order created:', newOrder._id);
@@ -143,6 +192,7 @@ const createOrder = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Create order error:', error);
+    console.error('Stack:', error.stack);
     res.status(500).json({ 
       success: false, 
       message: 'Lỗi khi tạo đơn hàng: ' + error.message
@@ -344,7 +394,7 @@ const cancelOrder = async (req, res) => {
         product = await Product.findOne({ name: item.name });
       }
 
-      if (product) {
+      if (product && product.stock !== undefined) {
         const oldStock = product.stock;
         
         await Product.findByIdAndUpdate(
