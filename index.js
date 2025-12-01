@@ -4,15 +4,18 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 
+// 🔥 IMPORT EMAIL SERVICE
+const { verifyEmailConfig } = require('./src/services/emailService');
+
 const app = express();
 const port = process.env.PORT || 5000;
 
-// 🔥 CORS CONFIGURATION - FIX
+// 🔥 CORS CONFIGURATION
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
-  'https://ny-na-house-store-frontend.vercel.app',  // ✅ Bỏ dấu /
-  /\.vercel\.app$/  // ✅ Regex để cho phép tất cả preview deployments
+  'https://ny-na-house-store-frontend.vercel.app',
+  /\.vercel\.app$/ // Regex để cho phép tất cả preview deployments
 ];
 
 app.use(cors({
@@ -52,7 +55,7 @@ app.options('*', cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// 🔥 REQUEST LOGGER (helpful for debugging)
+// 🔥 REQUEST LOGGER
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'No origin'}`);
   next();
@@ -74,8 +77,15 @@ app.use('/api/admin', adminRoutes);
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Vietnamese E-commerce API is running!',
-    version: '1.0.0',
+    version: '2.0.0',
     cors: 'enabled',
+    features: {
+      '2FA': 'Email OTP verification',
+      'Admin': 'Two-factor authentication',
+      'Products': 'CRUD operations',
+      'Orders': 'Order management',
+      'Users': 'Authentication & authorization'
+    },
     allowedOrigins: allowedOrigins.map(o => o.toString()),
     endpoints: {
       products: '/api/products',
@@ -91,7 +101,9 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    memory: process.memoryUsage()
   });
 });
 
@@ -126,62 +138,127 @@ app.use((err, req, res, next) => {
 // 🔥 STORE SERVER INSTANCE
 let server;
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
+// 🔥 START SERVER WITH EMAIL SERVICE VERIFICATION
+const startServer = async () => {
+  try {
+    // Step 1: Connect to MongoDB
+    console.log('🔄 Connecting to MongoDB...');
+    await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ MongoDB connected successfully');
     console.log('📦 Database:', mongoose.connection.name);
     
-    // 🔥 ASSIGN SERVER INSTANCE
+    // Step 2: Verify Email Service
+    console.log('🔄 Verifying email service...');
+    const emailReady = await verifyEmailConfig();
+    
+    if (emailReady) {
+      console.log('✅ Email service configured and ready');
+      console.log('📧 Email user:', process.env.EMAIL_USER);
+    } else {
+      console.warn('⚠️ Email service not configured properly');
+      console.warn('💡 2FA features will not work without email configuration');
+      console.warn('📝 Please set EMAIL_USER and EMAIL_PASSWORD in .env file');
+    }
+    
+    // Step 3: Start HTTP Server
     server = app.listen(port, () => {
-      console.log('='.repeat(60));
+      console.log('='.repeat(70));
       console.log(`🚀 Server is running on port ${port}`);
-      console.log(`📍 API: https://nyna-house-store-backend-3.onrender.com`);
-      console.log(`🌐 CORS enabled for:`, allowedOrigins.map(o => o.toString()).join(', '));
-      console.log('='.repeat(60));
+      console.log(`🔗 API: https://nyna-house-store-backend-3.onrender.com`);
+      console.log(`🌐 CORS enabled for:`);
+      allowedOrigins.forEach(origin => {
+        console.log(`   - ${origin.toString()}`);
+      });
+      console.log(`🔐 Features:`);
+      console.log(`   - Two-Factor Authentication (2FA) via Email`);
+      console.log(`   - Admin OTP verification`);
+      console.log(`   - Secure JWT tokens`);
+      console.log('='.repeat(70));
     });
-  })
-  .catch((err) => {
-    console.error('❌ MongoDB connection error:', err);
+    
+  } catch (error) {
+    console.error('❌ Server startup error:', error);
+    console.error('Stack:', error.stack);
     process.exit(1);
-  });
+  }
+};
+
+// 🔥 START THE SERVER
+startServer();
 
 // 🔥 HANDLE UNHANDLED PROMISE REJECTIONS
 process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Rejection:', err);
+  console.error('❌ Unhandled Rejection:', err.message);
+  console.error('Stack:', err.stack);
+  
   if (server) {
+    console.log('🔄 Closing server...');
     server.close(() => {
-      process.exit(1);
+      console.log('💤 Server closed');
+      mongoose.connection.close(false, () => {
+        console.log('💤 MongoDB connection closed');
+        process.exit(1);
+      });
     });
   } else {
     process.exit(1);
   }
 });
 
-// 🔥 HANDLE SIGTERM
+// 🔥 HANDLE SIGTERM (Production shutdown)
 process.on('SIGTERM', () => {
-  console.log('👋 SIGTERM received, shutting down gracefully');
+  console.log('👋 SIGTERM received, shutting down gracefully...');
+  
   if (server) {
     server.close(() => {
-      console.log('💤 Process terminated');
+      console.log('💤 HTTP server closed');
+      
       mongoose.connection.close(false, () => {
         console.log('💤 MongoDB connection closed');
+        console.log('✅ Graceful shutdown complete');
         process.exit(0);
       });
     });
+    
+    // Force shutdown after 30 seconds
+    setTimeout(() => {
+      console.error('⚠️ Forced shutdown after timeout');
+      process.exit(1);
+    }, 30000);
+  } else {
+    process.exit(0);
   }
 });
 
-// 🔥 HANDLE SIGINT (Ctrl+C)
+// 🔥 HANDLE SIGINT (Ctrl+C in development)
 process.on('SIGINT', () => {
-  console.log('👋 SIGINT received, shutting down gracefully');
+  console.log('\n👋 SIGINT received, shutting down gracefully...');
+  
   if (server) {
     server.close(() => {
-      console.log('💤 Process terminated');
+      console.log('💤 HTTP server closed');
+      
       mongoose.connection.close(false, () => {
         console.log('💤 MongoDB connection closed');
+        console.log('✅ Graceful shutdown complete');
         process.exit(0);
       });
     });
+  } else {
+    process.exit(0);
   }
 });
+
+// 🔥 HANDLE UNCAUGHT EXCEPTIONS
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err.message);
+  console.error('Stack:', err.stack);
+  console.error('⚠️ Application will restart...');
+  
+  // Log error to file or monitoring service here
+  
+  process.exit(1);
+});
+
+// Export app for testing
+module.exports = app;
