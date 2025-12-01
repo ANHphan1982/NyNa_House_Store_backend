@@ -73,7 +73,7 @@ router.post('/admin/login', async (req, res) => {
 
     // Send OTP via email
     try {
-      await sendOTPEmail(user.email, otp, user.username || user.email.split('@')[0]);
+      await sendOTPEmail(user.email, otp, user.username || user.name || user.email.split('@')[0]);
       console.log('✅ OTP email sent successfully');
     } catch (emailError) {
       console.error('❌ Email sending failed:', emailError);
@@ -192,7 +192,7 @@ router.post('/admin/verify-otp', async (req, res) => {
       email: user.email,
       phone: user.phone || '',
       role: user.role,
-      name: user.name || user.username || user.email.split('@')[0] // 🔥 CRITICAL: Add name field
+      name: user.name || user.username || user.email.split('@')[0] // 🔥 CRITICAL
     };
 
     const responseData = {
@@ -271,7 +271,7 @@ router.post('/admin/resend-otp', async (req, res) => {
     });
 
     // Send email
-    await sendOTPEmail(user.email, otp, user.username || user.email.split('@')[0]);
+    await sendOTPEmail(user.email, otp, user.username || user.name || user.email.split('@')[0]);
 
     console.log('✅ OTP resent successfully');
 
