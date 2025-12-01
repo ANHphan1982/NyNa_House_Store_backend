@@ -7,6 +7,176 @@ const jwt = require('jsonwebtoken');
 const otpGenerator = require('otp-generator');
 const { sendOTPEmail } = require('../services/emailService');
 
+// 🔥 USER LOGIN (Regular users - không cần 2FA)
+router.post('/login', async (req, res) => {
+  try {
+    const { identifier, password } = req.body;
+
+    console.log('🔐 User login attempt:', identifier);
+
+    if (!identifier || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng nhập đầy đủ thông tin'
+      });
+    }
+
+    // Find user by email or phone
+    const user = await User.findOne({
+      $or: [{ email: identifier }, { phone: identifier }]
+    });
+
+    if (!user) {
+      console.log('❌ User not found');
+      return res.status(401).json({
+        success: false,
+        message: 'Thông tin đăng nhập không chính xác'
+      });
+    }
+
+    // Check password
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) {
+      console.log('❌ Password incorrect');
+      return res.status(401).json({
+        success: false,
+        message: 'Thông tin đăng nhập không chính xác'
+      });
+    }
+
+    console.log('✅ Login successful');
+
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        role: user.role || 'user',
+        email: user.email
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // 🔥 ĐẢMBẢO USER OBJECT ĐẦY ĐỦ VỚI FIELD "name"
+    const userObject = {
+      id: user._id.toString(),
+      _id: user._id.toString(),
+      username: user.username || user.name || user.email?.split('@')[0],
+      email: user.email,
+      phone: user.phone || '',
+      role: user.role || 'user',
+      name: user.name || user.username || user.email?.split('@')[0] // 🔥 CRITICAL
+    };
+
+    console.log('✅ Token generated for:', user.email);
+
+    res.json({
+      success: true,
+      message: 'Đăng nhập thành công',
+      token,
+      user: userObject
+    });
+
+  } catch (error) {
+    console.error('❌ User login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi server. Vui lòng thử lại sau.'
+    });
+  }
+});
+
+// 🔥 USER REGISTER
+router.post('/register', async (req, res) => {
+  try {
+    const { name, phone, password, email } = req.body;
+
+    console.log('📝 Register attempt:', phone || email);
+
+    // Validate required fields
+    if (!name || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng nhập đầy đủ thông tin'
+      });
+    }
+
+    if (!phone && !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng nhập số điện thoại hoặc email'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [
+        { email: email },
+        { phone: phone }
+      ]
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email hoặc số điện thoại đã được đăng ký'
+      });
+    }
+
+    // Create new user
+    const user = new User({
+      name,
+      username: name,
+      email: email || `${phone}@temp.local`,
+      phone: phone || '',
+      password,
+      role: 'user',
+      registerType: phone ? 'phone' : 'email',
+      isActive: true
+    });
+
+    await user.save();
+
+    console.log('✅ User registered successfully');
+
+    // Generate token
+    const token = jwt.sign(
+      {
+        userId: user._id,
+        role: user.role,
+        email: user.email
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // 🔥 USER OBJECT ĐẦY ĐỦ
+    const userObject = {
+      id: user._id.toString(),
+      _id: user._id.toString(),
+      username: user.username || user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      name: user.name
+    };
+
+    res.status(201).json({
+      success: true,
+      message: 'Đăng ký thành công',
+      token,
+      user: userObject
+    });
+
+  } catch (error) {
+    console.error('❌ Register error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi server. Vui lòng thử lại sau.'
+    });
+  }
+});
+
 // 🔥 STEP 1: Admin Login - Gửi OTP
 router.post('/admin/login', async (req, res) => {
   try {
