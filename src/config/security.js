@@ -238,6 +238,7 @@ const registerLimiter = rateLimiters.register;
 const orderLimiter = rateLimiters.orders;
 const otpLimiter = rateLimiters.otp;
 const adminLimiter = rateLimiters.admin;
+const emailLimiter = rateLimiters.otp; 
 
 // 🔥 EXPORT TẤT CẢ (THÊM ALIASES)
 module.exports = {
@@ -250,6 +251,7 @@ module.exports = {
   authLimiter,
   registerLimiter,
   orderLimiter,
+  emailLimiter,
   otpLimiter,
   adminLimiter
 };

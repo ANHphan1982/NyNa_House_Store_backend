@@ -8,6 +8,7 @@ const otpGenerator = require('otp-generator');
 const { sendOTPEmail } = require('../services/emailService');
 
 // 🔒 IMPORT SECURITY
+//const { authLimiter, emailLimiter } = require('../config/security');
 const { authLimiter, emailLimiter } = require('../config/security');
 const {
   validateEmail,
