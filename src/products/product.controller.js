@@ -1,7 +1,12 @@
 // backend/src/products/product.controller.js
 const Product = require('./product.model');
+const {
+  validateNumber,
+  sanitizeString,
+  sanitizeObject
+} = require('../utils/validation');
 
-// Get all products
+// Get all products (Public)
 const getAllProducts = async (req, res) => {
   try {
     const { 
@@ -13,27 +18,37 @@ const getAllProducts = async (req, res) => {
       limit = 100
     } = req.query;
 
+    // 🔒 Validate pagination
+    const validatedPage = Math.max(parseInt(page) || 1, 1);
+    const validatedLimit = Math.min(parseInt(limit) || 100, 100); // Max 100
+
     let query = { isActive: true };
 
+    // 🔒 Sanitize search inputs
     if (category && category !== 'Tất cả') {
-      query.category = category;
+      query.category = sanitizeString(category, 50);
     }
 
     if (search) {
+      const sanitizedSearch = sanitizeString(search, 100);
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
+        { name: { $regex: sanitizedSearch, $options: 'i' } },
+        { description: { $regex: sanitizedSearch, $options: 'i' } }
       ];
     }
 
+    // 🔒 Validate sort field (whitelist)
+    const allowedSortFields = ['createdAt', 'price', 'name', 'productId'];
+    const validSort = allowedSortFields.includes(sort) ? sort : 'createdAt';
+    
     const sortOrder = order === 'asc' ? 1 : -1;
-    const sortObj = { [sort]: sortOrder };
+    const sortObj = { [validSort]: sortOrder };
 
-    const skip = (page - 1) * limit;
+    const skip = (validatedPage - 1) * validatedLimit;
     const products = await Product.find(query)
       .sort(sortObj)
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(validatedLimit);
 
     const total = await Product.countDocuments(query);
 
@@ -44,8 +59,8 @@ const getAllProducts = async (req, res) => {
       products,
       pagination: {
         total,
-        page: parseInt(page),
-        pages: Math.ceil(total / limit)
+        page: validatedPage,
+        pages: Math.ceil(total / validatedLimit)
       }
     });
   } catch (error) {
@@ -57,20 +72,40 @@ const getAllProducts = async (req, res) => {
   }
 };
 
-// Get single product
+// Get single product (Public)
 const getProductById = async (req, res) => {
   try {
-    console.log('🔍 Getting product by ID:', req.params.id);
+    const productId = sanitizeString(req.params.id, 50);
+    console.log('🔍 Getting product by ID:', productId);
     
     let product = null;
     
     // Tìm theo productId hoặc _id
-    if (!isNaN(req.params.id)) {
+    if (!isNaN(productId)) {
       console.log('  → Searching by productId (number)');
-      product = await Product.findOne({ productId: parseInt(req.params.id) });
+      const numericId = parseInt(productId);
+      
+      // 🔒 Validate number range
+      if (numericId < 1 || numericId > 999999) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Product ID không hợp lệ' 
+        });
+      }
+      
+      product = await Product.findOne({ productId: numericId });
     } else {
       console.log('  → Searching by _id (ObjectId)');
-      product = await Product.findById(req.params.id);
+      
+      // 🔒 Validate MongoDB ObjectId format
+      if (!/^[0-9a-fA-F]{24}$/.test(productId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'ID không hợp lệ' 
+        });
+      }
+      
+      product = await Product.findById(productId);
     }
 
     if (!product) {
@@ -96,20 +131,47 @@ const getProductById = async (req, res) => {
   }
 };
 
-// Create product (Admin)
+// Create product (Admin only)
 const createProduct = async (req, res) => {
   try {
     console.log('📦 Creating product:', req.body.name);
     console.log('👤 Admin ID:', req.userId);
 
+    // 🔒 Sanitize input
+    const sanitizedData = sanitizeObject(req.body);
+    
+    // 🔒 Validate required fields
+    if (!sanitizedData.name || sanitizedData.name.trim().length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tên sản phẩm phải có ít nhất 2 ký tự'
+      });
+    }
+
+    // 🔒 Validate price
+    if (sanitizedData.price !== undefined) {
+      const priceValidation = validateNumber(sanitizedData.price, {
+        min: 0,
+        max: 999999999,
+        allowDecimal: true
+      });
+      
+      if (!priceValidation.isValid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Giá sản phẩm không hợp lệ'
+        });
+      }
+    }
+
     // Kiểm tra productId đã tồn tại chưa
-    if (req.body.productId) {
+    if (sanitizedData.productId) {
       const existingProduct = await Product.findOne({ 
-        productId: req.body.productId 
+        productId: sanitizedData.productId 
       });
       
       if (existingProduct) {
-        console.log('❌ Product ID already exists:', req.body.productId);
+        console.log('❌ Product ID already exists:', sanitizedData.productId);
         return res.status(400).json({
           success: false,
           message: 'Product ID đã tồn tại'
@@ -117,7 +179,7 @@ const createProduct = async (req, res) => {
       }
     }
 
-    const newProduct = new Product(req.body);
+    const newProduct = new Product(sanitizedData);
     await newProduct.save();
 
     console.log('✅ Product created successfully');
@@ -132,35 +194,74 @@ const createProduct = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Create product error:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Dữ liệu không hợp lệ',
+        errors: Object.values(error.errors).map(e => e.message)
+      });
+    }
+    
     res.status(500).json({ 
       success: false, 
-      message: 'Lỗi khi thêm sản phẩm: ' + error.message
+      message: 'Lỗi khi thêm sản phẩm'
     });
   }
 };
 
-// Update product (Admin)
+// Update product (Admin only)
 const updateProduct = async (req, res) => {
   try {
-    console.log('📝 Updating product:', req.params.id);
+    const productId = sanitizeString(req.params.id, 50);
+    console.log('🔍 Updating product:', productId);
     console.log('👤 Admin ID:', req.userId);
-    console.log('📋 Update data:', req.body);
+    
+    // 🔒 Sanitize update data
+    const sanitizedData = sanitizeObject(req.body);
+    console.log('📋 Sanitized update data:', sanitizedData);
+    
+    // 🔒 Validate price if provided
+    if (sanitizedData.price !== undefined) {
+      const priceValidation = validateNumber(sanitizedData.price, {
+        min: 0,
+        max: 999999999,
+        allowDecimal: true
+      });
+      
+      if (!priceValidation.isValid) {
+        return res.status(400).json({
+          success: false,
+          message: 'Giá sản phẩm không hợp lệ'
+        });
+      }
+    }
     
     let product = null;
     
     // Tìm theo productId hoặc _id
-    if (!isNaN(req.params.id)) {
+    if (!isNaN(productId)) {
       console.log('  → Updating by productId (number)');
       product = await Product.findOneAndUpdate(
-        { productId: parseInt(req.params.id) },
-        req.body,
+        { productId: parseInt(productId) },
+        sanitizedData,
         { new: true, runValidators: true }
       );
     } else {
       console.log('  → Updating by _id (ObjectId)');
+      
+      // 🔒 Validate ObjectId
+      if (!/^[0-9a-fA-F]{24}$/.test(productId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'ID không hợp lệ' 
+        });
+      }
+      
       product = await Product.findByIdAndUpdate(
-        req.params.id,
-        req.body,
+        productId,
+        sanitizedData,
         { new: true, runValidators: true }
       );
     }
@@ -182,6 +283,16 @@ const updateProduct = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Update product error:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Dữ liệu không hợp lệ',
+        errors: Object.values(error.errors).map(e => e.message)
+      });
+    }
+    
     res.status(500).json({ 
       success: false, 
       message: 'Lỗi khi cập nhật sản phẩm' 
@@ -189,34 +300,52 @@ const updateProduct = async (req, res) => {
   }
 };
 
-// Delete product (Admin)
+// Delete product (Admin only)
 const deleteProduct = async (req, res) => {
   try {
-    console.log('🗑️  DELETE Request received');
-    console.log('📋 Product ID:', req.params.id);
+    const productId = sanitizeString(req.params.id, 50);
+    console.log('🗑️ DELETE Request received');
+    console.log('📋 Product ID:', productId);
     console.log('👤 Admin ID:', req.userId, '| Role:', req.role);
     
     let product = null;
     
     // Tìm theo productId hoặc _id
-    if (!isNaN(req.params.id)) {
-      console.log('🔍 Searching by productId (number):', parseInt(req.params.id));
+    if (!isNaN(productId)) {
+      console.log('🔍 Searching by productId (number):', parseInt(productId));
+      
+      // 🔒 Validate number
+      const numericId = parseInt(productId);
+      if (numericId < 1 || numericId > 999999) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Product ID không hợp lệ' 
+        });
+      }
       
       // First check if exists
-      const checkProduct = await Product.findOne({ productId: parseInt(req.params.id) });
+      const checkProduct = await Product.findOne({ productId: numericId });
       console.log('  → Product exists before delete:', !!checkProduct);
       
       product = await Product.findOneAndDelete({ 
-        productId: parseInt(req.params.id) 
+        productId: numericId 
       });
     } else {
-      console.log('🔍 Searching by _id (ObjectId):', req.params.id);
+      console.log('🔍 Searching by _id (ObjectId):', productId);
+      
+      // 🔒 Validate ObjectId
+      if (!/^[0-9a-fA-F]{24}$/.test(productId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'ID không hợp lệ' 
+        });
+      }
       
       // First check if exists
-      const checkProduct = await Product.findById(req.params.id);
+      const checkProduct = await Product.findById(productId);
       console.log('  → Product exists before delete:', !!checkProduct);
       
-      product = await Product.findByIdAndDelete(req.params.id);
+      product = await Product.findByIdAndDelete(productId);
     }
 
     if (!product) {
@@ -247,22 +376,41 @@ const deleteProduct = async (req, res) => {
     console.error('   Stack:', error.stack);
     res.status(500).json({ 
       success: false, 
-      message: 'Lỗi khi xóa sản phẩm: ' + error.message
+      message: 'Lỗi khi xóa sản phẩm'
     });
   }
 };
 
-// Get related products
+// Get related products (Public)
 const getRelatedProducts = async (req, res) => {
   try {
-    console.log('🔗 Getting related products for:', req.params.id);
+    const productId = sanitizeString(req.params.id, 50);
+    console.log('🔗 Getting related products for:', productId);
     
     let product = null;
     
-    if (!isNaN(req.params.id)) {
-      product = await Product.findOne({ productId: parseInt(req.params.id) });
+    if (!isNaN(productId)) {
+      const numericId = parseInt(productId);
+      
+      // 🔒 Validate number
+      if (numericId < 1 || numericId > 999999) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Product ID không hợp lệ' 
+        });
+      }
+      
+      product = await Product.findOne({ productId: numericId });
     } else {
-      product = await Product.findById(req.params.id);
+      // 🔒 Validate ObjectId
+      if (!/^[0-9a-fA-F]{24}$/.test(productId)) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'ID không hợp lệ' 
+        });
+      }
+      
+      product = await Product.findById(productId);
     }
     
     if (!product) {
@@ -294,6 +442,7 @@ const getRelatedProducts = async (req, res) => {
   }
 };
 
+// 🔥 CRITICAL: Export all functions
 module.exports = {
   getAllProducts,
   getProductById,
