@@ -2,10 +2,10 @@
 const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
-  productId: {  // 🔥 THÊM FIELD NÀY - Để match với localStorage
+  productId: {
     type: Number,
     unique: true,
-    sparse: true  // Cho phép null/undefined
+    sparse: true
   },
   name: {
     type: String,
@@ -66,7 +66,7 @@ const productSchema = new mongoose.Schema({
 
 // Index for search
 productSchema.index({ name: 'text', description: 'text' });
-productSchema.index({ productId: 1 }); // 🔥 THÊM INDEX
+productSchema.index({ productId: 1 });
 
 const Product = mongoose.model('Product', productSchema);
 

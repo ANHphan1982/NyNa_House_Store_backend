@@ -342,6 +342,57 @@ const validateProductId = (productId) => {
   };
 };
 
+// 🔥 VALIDATE NUMBER - FUNCTION MỚI
+const validateNumber = (value, options = {}) => {
+  const {
+    min = -Infinity,
+    max = Infinity,
+    integer = false,
+    allowDecimal = true
+  } = options;
+
+  // Convert to number
+  const num = Number(value);
+  
+  // Check if valid number
+  if (isNaN(num)) {
+    return { 
+      isValid: false, 
+      message: 'Giá trị phải là số' 
+    };
+  }
+  
+  // Check if integer required
+  if (integer && !Number.isInteger(num)) {
+    return { 
+      isValid: false, 
+      message: 'Giá trị phải là số nguyên' 
+    };
+  }
+  
+  // Check min value
+  if (num < min) {
+    return { 
+      isValid: false, 
+      message: `Giá trị phải lớn hơn hoặc bằng ${min}` 
+    };
+  }
+  
+  // Check max value
+  if (num > max) {
+    return { 
+      isValid: false, 
+      message: `Giá trị phải nhỏ hơn hoặc bằng ${max}` 
+    };
+  }
+  
+  return { 
+    isValid: true, 
+    value: num,
+    message: 'Giá trị hợp lệ'
+  };
+};
+
 // ✅ SANITIZE OBJECT (recursively)
 const sanitizeObject = (obj, maxDepth = 5, currentDepth = 0) => {
   if (currentDepth >= maxDepth) {
@@ -429,6 +480,7 @@ const validateOrderData = (orderData) => {
   };
 };
 
+// 🔥 EXPORTS - THÊM validateNumber
 module.exports = {
   sanitizeString,
   sanitizeHTML,
@@ -441,5 +493,6 @@ module.exports = {
   validatePrice,
   validateQuantity,
   validateProductId,
+  validateNumber,      // 🔥 THÊM DÒNG NÀY
   validateOrderData
 };
