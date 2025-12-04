@@ -12,13 +12,13 @@ const { authLimiter } = require('../config/security');
 const emailLimiter = authLimiter; // Dùng tạm authLimiter thay emailLimiter
 
 // 🔒 IMPORT VALIDATION
+// 🔒 IMPORT VALIDATION
 const {
   validateEmail,
   validatePhone,
   validatePassword,
   validateLoginData,
-  validateRegistrationData,
-  sanitizeName
+  validateRegistrationData
 } = require('../utils/validation');
 
 console.log('✅ User routes loaded with 2FA OTP system');
@@ -175,9 +175,9 @@ router.post('/register', authLimiter, async (req, res) => {
     
     const { name, email, phone, password } = req.body;
 
-    // ✅ Sanitize and prepare data
+    // ✅ Sanitize and prepare data (FIXED - no sanitizeName)
     const sanitizedData = {
-      name: sanitizeName(name),
+      name: name ? name.trim() : undefined,  // 🔥 FIXED
       email: email ? email.trim().toLowerCase() : undefined,
       phone: phone ? phone.trim() : undefined,
       password: password
@@ -189,6 +189,7 @@ router.post('/register', authLimiter, async (req, res) => {
       phone: sanitizedData.phone,
       hasPassword: !!sanitizedData.password
     });
+
 
     // ✅ Validate input
     const validation = validateRegistrationData(sanitizedData);
