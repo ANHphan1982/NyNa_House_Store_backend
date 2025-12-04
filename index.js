@@ -1,93 +1,121 @@
 // backend/index.js
 const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
 require('dotenv').config();
 
-// 🔥 IMPORT EMAIL SERVICE
+// 🔒 IMPORT SECURITY CONFIGURATION
+const { setupSecurity } = require('./src/config/security');
+
+// 📧 IMPORT EMAIL SERVICE
 const { verifyEmailConfig } = require('./src/services/emailService');
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// 🔥 CORS CONFIGURATION
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'https://ny-na-house-store-frontend.vercel.app',
-  /\.vercel\.app$/ // Regex để cho phép tất cả preview deployments
-];
+// =========================================
+// 1. SECURITY MIDDLEWARE (MUST BE FIRST)
+// =========================================
+console.log('🔒 Initializing security...');
+setupSecurity(app);
 
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin) return callback(null, true);
-    
-    // Check if origin is allowed
-    const isAllowed = allowedOrigins.some(allowedOrigin => {
-      if (typeof allowedOrigin === 'string') {
-        return origin === allowedOrigin;
-      }
-      if (allowedOrigin instanceof RegExp) {
-        return allowedOrigin.test(origin);
-      }
-      return false;
-    });
+// =========================================
+// 2. BODY PARSER (AFTER SECURITY)
+// =========================================
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.log('❌ CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 86400 // 24 hours
-}));
-
-// 🔥 PREFLIGHT OPTIONS HANDLER
-app.options('*', cors());
-
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// 🔥 REQUEST LOGGER
+// =========================================
+// 3. REQUEST LOGGER
+// =========================================
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.path} - Origin: ${req.headers.origin || 'No origin'}`);
+  const timestamp = new Date().toISOString();
+  const origin = req.headers.origin || 'No origin';
+  console.log(`[${timestamp}] ${req.method} ${req.path} - Origin: ${origin}`);
   next();
 });
 
-// Import Routes
+// =========================================
+// 4. IMPORT ROUTES
+// =========================================
 const productRoutes = require('./src/products/product.route');
 const orderRoutes = require('./src/orders/order.route');
 const userRoutes = require('./src/users/user.route');
 const adminRoutes = require('./src/admin/admin.route');
 
-// Mount Routes
+// =========================================
+// 5. MOUNT ROUTES
+// =========================================
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/auth', userRoutes);
 app.use('/api/admin', adminRoutes);
 
+// =========================================
+// 6. ROOT & HEALTH CHECK ROUTES
+// =========================================
+
 // Root route
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Vietnamese E-commerce API is running!',
+    message: 'NyNA House Store API - Secure E-commerce Backend',
     version: '2.0.0',
-    cors: 'enabled',
+    status: 'running',
+    security: {
+      cors: 'enabled',
+      rateLimiting: 'enabled',
+      xssProtection: 'enabled',
+      mongoSanitization: 'enabled',
+      helmet: 'enabled'
+    },
     features: {
       '2FA': 'Email OTP verification',
       'Admin': 'Two-factor authentication',
       'Products': 'CRUD operations',
-      'Orders': 'Order management',
-      'Users': 'Authentication & authorization'
+      'Orders': 'Order management with validation',
+      'Users': 'Authentication & authorization',
+      'Security': 'Rate limiting, input sanitization'
     },
-    allowedOrigins: allowedOrigins.map(o => o.toString()),
     endpoints: {
+      products: '/api/products',
+      orders: '/api/orders',
+      auth: '/api/auth',
+      admin: '/api/admin',
+      health: '/health'
+    }
+  });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  const healthStatus = {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    environment: process.env.NODE_ENV || 'development',
+    services: {
+      mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+      email: process.env.EMAIL_USER ? 'configured' : 'not configured'
+    },
+    memory: {
+      used: Math.floor(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
+      total: Math.floor(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB'
+    }
+  };
+  
+  res.json(healthStatus);
+});
+
+// =========================================
+// 7. ERROR HANDLERS
+// =========================================
+
+// 404 handler
+app.use((req, res, next) => {
+  console.log(`⚠️ 404 - Route not found: ${req.method} ${req.path}`);
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.path}`,
+    availableEndpoints: {
       products: '/api/products',
       orders: '/api/orders',
       auth: '/api/auth',
@@ -96,31 +124,16 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    memory: process.memoryUsage()
-  });
-});
-
-// 404 handler
-app.use((req, res, next) => {
-  console.log('❌ 404 - Route not found:', req.method, req.path);
-  res.status(404).json({
-    success: false,
-    message: `Route not found: ${req.method} ${req.path}`
-  });
-});
-
-// Error handling middleware
+// Global error handler
 app.use((err, req, res, next) => {
-  console.error('❌ Error:', err.stack);
+  console.error('❌ Error:', err.message);
   
-  // Handle CORS errors specifically
+  // Log stack trace in development only
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Stack:', err.stack);
+  }
+  
+  // Handle CORS errors
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({
       success: false,
@@ -128,32 +141,81 @@ app.use((err, req, res, next) => {
     });
   }
   
-  res.status(err.status || 500).json({
+  // Handle validation errors
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      success: false,
+      message: 'Dữ liệu không hợp lệ',
+      errors: Object.values(err.errors).map(e => e.message)
+    });
+  }
+  
+  // Handle JWT errors
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Token không hợp lệ'
+    });
+  }
+  
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({
+      success: false,
+      message: 'Token đã hết hạn'
+    });
+  }
+  
+  // Handle MongoDB duplicate key errors
+  if (err.code === 11000) {
+    const field = Object.keys(err.keyPattern)[0];
+    return res.status(400).json({
+      success: false,
+      message: `${field} đã tồn tại trong hệ thống`
+    });
+  }
+  
+  // Generic error response
+  const statusCode = err.statusCode || err.status || 500;
+  const message = process.env.NODE_ENV === 'production' 
+    ? 'Đã xảy ra lỗi, vui lòng thử lại sau'
+    : err.message;
+  
+  res.status(statusCode).json({
     success: false,
-    message: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    message,
+    ...(process.env.NODE_ENV === 'development' && { 
+      stack: err.stack,
+      error: err 
+    })
   });
 });
 
-// 🔥 STORE SERVER INSTANCE
+// =========================================
+// 8. SERVER STARTUP
+// =========================================
+
 let server;
 
-// 🔥 START SERVER WITH EMAIL SERVICE VERIFICATION
 const startServer = async () => {
   try {
+    console.log('\n' + '='.repeat(70));
+    console.log('🚀 Starting NyNA House Store Backend Server...');
+    console.log('='.repeat(70));
+    
     // Step 1: Connect to MongoDB
-    console.log('🔄 Connecting to MongoDB...');
+    console.log('\n📊 Step 1: Connecting to MongoDB...');
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('✅ MongoDB connected successfully');
-    console.log('📦 Database:', mongoose.connection.name);
+    console.log(`📦 Database: ${mongoose.connection.name}`);
+    console.log(`🌐 Host: ${mongoose.connection.host}`);
     
     // Step 2: Verify Email Service
-    console.log('🔄 Verifying email service...');
+    console.log('\n📧 Step 2: Verifying email service...');
     const emailReady = await verifyEmailConfig();
     
     if (emailReady) {
       console.log('✅ Email service configured and ready');
-      console.log('📧 Email user:', process.env.EMAIL_USER);
+      console.log(`📨 Email user: ${process.env.EMAIL_USER}`);
     } else {
       console.warn('⚠️ Email service not configured properly');
       console.warn('💡 2FA features will not work without email configuration');
@@ -161,38 +223,62 @@ const startServer = async () => {
     }
     
     // Step 3: Start HTTP Server
+    console.log('\n🌐 Step 3: Starting HTTP server...');
     server = app.listen(port, () => {
+      console.log('✅ HTTP server started successfully');
+      console.log('\n' + '='.repeat(70));
+      console.log('🎉 SERVER IS READY!');
       console.log('='.repeat(70));
-      console.log(`🚀 Server is running on port ${port}`);
-      console.log(`🔗 API: https://nyna-house-store-backend-3.onrender.com`);
-      console.log(`🌐 CORS enabled for:`);
-      allowedOrigins.forEach(origin => {
-        console.log(`   - ${origin.toString()}`);
-      });
-      console.log(`🔐 Features:`);
-      console.log(`   - Two-Factor Authentication (2FA) via Email`);
-      console.log(`   - Admin OTP verification`);
-      console.log(`   - Secure JWT tokens`);
-      console.log('='.repeat(70));
+      console.log(`📍 Port: ${port}`);
+      console.log(`🔗 API URL: ${process.env.API_URL || `http://localhost:${port}`}`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`\n🔒 Security Features:`);
+      console.log(`   ✓ Rate Limiting (100 req/15min general, 5 req/15min auth)`);
+      console.log(`   ✓ XSS Protection`);
+      console.log(`   ✓ NoSQL Injection Prevention`);
+      console.log(`   ✓ CORS Protection`);
+      console.log(`   ✓ Helmet Security Headers`);
+      console.log(`   ✓ Input Validation & Sanitization`);
+      console.log(`\n📱 Features:`);
+      console.log(`   ✓ Two-Factor Authentication (2FA) via Email`);
+      console.log(`   ✓ Admin OTP Verification`);
+      console.log(`   ✓ Secure JWT Tokens`);
+      console.log(`   ✓ Password Policy (8+ chars, uppercase, lowercase, number, special char)`);
+      console.log(`\n📚 API Endpoints:`);
+      console.log(`   🛍️  Products: /api/products`);
+      console.log(`   📦 Orders: /api/orders`);
+      console.log(`   👤 Auth: /api/auth`);
+      console.log(`   🔐 Admin: /api/admin`);
+      console.log(`   ❤️  Health: /health`);
+      console.log('='.repeat(70) + '\n');
     });
     
   } catch (error) {
-    console.error('❌ Server startup error:', error);
+    console.error('\n❌ Server startup error:', error.message);
     console.error('Stack:', error.stack);
+    console.error('\n💡 Common issues:');
+    console.error('   - Check MONGODB_URI in .env file');
+    console.error('   - Ensure MongoDB is accessible');
+    console.error('   - Verify all environment variables are set');
+    console.error('   - Check network connectivity\n');
     process.exit(1);
   }
 };
 
-// 🔥 START THE SERVER
+// Start the server
 startServer();
 
-// 🔥 HANDLE UNHANDLED PROMISE REJECTIONS
+// =========================================
+// 9. PROCESS EVENT HANDLERS
+// =========================================
+
+// Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Rejection:', err.message);
+  console.error('\n❌ Unhandled Promise Rejection:', err.message);
   console.error('Stack:', err.stack);
   
   if (server) {
-    console.log('🔄 Closing server...');
+    console.log('🔄 Closing server gracefully...');
     server.close(() => {
       console.log('💤 Server closed');
       mongoose.connection.close(false, () => {
@@ -205,9 +291,9 @@ process.on('unhandledRejection', (err) => {
   }
 });
 
-// 🔥 HANDLE SIGTERM (Production shutdown)
+// Handle SIGTERM (Production shutdown signal)
 process.on('SIGTERM', () => {
-  console.log('👋 SIGTERM received, shutting down gracefully...');
+  console.log('\n👋 SIGTERM received, shutting down gracefully...');
   
   if (server) {
     server.close(() => {
@@ -215,7 +301,7 @@ process.on('SIGTERM', () => {
       
       mongoose.connection.close(false, () => {
         console.log('💤 MongoDB connection closed');
-        console.log('✅ Graceful shutdown complete');
+        console.log('✅ Graceful shutdown complete\n');
         process.exit(0);
       });
     });
@@ -230,9 +316,9 @@ process.on('SIGTERM', () => {
   }
 });
 
-// 🔥 HANDLE SIGINT (Ctrl+C in development)
+// Handle SIGINT (Ctrl+C in development)
 process.on('SIGINT', () => {
-  console.log('\n👋 SIGINT received, shutting down gracefully...');
+  console.log('\n👋 SIGINT received (Ctrl+C), shutting down gracefully...');
   
   if (server) {
     server.close(() => {
@@ -240,7 +326,7 @@ process.on('SIGINT', () => {
       
       mongoose.connection.close(false, () => {
         console.log('💤 MongoDB connection closed');
-        console.log('✅ Graceful shutdown complete');
+        console.log('✅ Graceful shutdown complete\n');
         process.exit(0);
       });
     });
@@ -249,13 +335,13 @@ process.on('SIGINT', () => {
   }
 });
 
-// 🔥 HANDLE UNCAUGHT EXCEPTIONS
+// Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err.message);
+  console.error('\n❌ Uncaught Exception:', err.message);
   console.error('Stack:', err.stack);
-  console.error('⚠️ Application will restart...');
+  console.error('⚠️ Application will exit...\n');
   
-  // Log error to file or monitoring service here
+  // Log error to monitoring service here if available
   
   process.exit(1);
 });

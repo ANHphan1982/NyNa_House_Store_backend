@@ -2,85 +2,103 @@
 const Order = require('./order.model');
 const Product = require('../products/product.model');
 
-// Create new order
+// 🔒 IMPORT VALIDATION
+const {
+  validateOrderData,
+  validateNumber,
+  sanitizeString,
+  sanitizeObject
+} = require('../utils/validation');
+
+// =====================================
+// 1. CREATE ORDER
+// =====================================
 const createOrder = async (req, res) => {
   try {
+    console.log('📦 Creating order for user:', req.userId);
+    
+    // 🔒 SANITIZE INPUT
+    const sanitizedBody = sanitizeObject(req.body);
+    
     const { 
-      products,      // 🔥 Frontend gửi "products"
-      items,         // 🔥 Fallback cho "items"
+      products,
+      items,
       shippingAddress, 
       paymentMethod, 
-      notes,         // 🔥 Frontend gửi "notes"
-      note,          // 🔥 Fallback cho "note"
+      notes,
+      note,
       subtotal,
       shippingFee, 
       totalAmount 
-    } = req.body;
+    } = sanitizedBody;
 
-    console.log('📦 Creating order for user:', req.userId);
-    console.log('📦 Request body:', JSON.stringify(req.body, null, 2));
-
-    // 🔥 FIX: Accept both "products" and "items"
+    // Accept both "products" and "items"
     const orderItems = products || items;
 
-    // Validate items
-    if (!orderItems || orderItems.length === 0) {
-      console.log('❌ No items in order');
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Đơn hàng phải có ít nhất 1 sản phẩm' 
+    // 🔒 VALIDATE ORDER DATA
+    const validation = validateOrderData({
+      products: orderItems,
+      shippingAddress,
+      paymentMethod
+    });
+
+    if (!validation.isValid) {
+      console.log('❌ Validation failed:', validation.errors);
+      return res.status(400).json({
+        success: false,
+        message: Object.values(validation.errors)[0],
+        errors: validation.errors
       });
     }
 
     console.log('✅ Order has', orderItems.length, 'items');
 
-    // Validate shipping address
-    if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.phone || !shippingAddress.address) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Thiếu thông tin địa chỉ giao hàng' 
-      });
-    }
-
-    // 🔥 BƯỚC 1: KIỂM TRA VÀ LẤY THÔNG TIN PRODUCTS
+    // =====================================
+    // STEP 1: VALIDATE & FIND PRODUCTS
+    // =====================================
     const productChecks = [];
     const validatedItems = [];
     
     for (let i = 0; i < orderItems.length; i++) {
       const item = orderItems[i];
       
-      console.log(`🔍 Processing item ${i}:`, JSON.stringify(item, null, 2));
+      console.log(`🔍 Processing item ${i}:`, {
+        productId: item.productId,
+        name: item.name,
+        quantity: item.quantity
+      });
       
-      // 🔥 TÌM THEO NHIỀU CÁCH
+      // 🔒 VALIDATE quantity
+      const quantityValidation = validateNumber(item.quantity, {
+        min: 1,
+        max: 9999,
+        integer: true
+      });
+      
+      if (!quantityValidation.isValid) {
+        return res.status(400).json({
+          success: false,
+          message: `Số lượng sản phẩm "${item.name}" không hợp lệ`
+        });
+      }
+
+      // Find product
       let product = null;
       
-      // Cách 1: Tìm theo productId (Number từ localStorage)
       if (item.productId) {
         product = await Product.findOne({ productId: item.productId });
         if (product) {
-          console.log(`✅ Found by productId: ${item.productId} -> ${product.name}`);
+          console.log(`✅ Found by productId: ${item.productId}`);
         }
       }
       
-      // Cách 2: Nếu không tìm thấy, tìm theo tên chính xác
       if (!product && item.name) {
         product = await Product.findOne({ 
           name: item.name,
           isActive: true
         });
         if (product) {
-          console.log(`✅ Found by exact name: ${item.name}`);
-        }
-      }
-      
-      // Cách 3: Nếu vẫn không có, tìm theo tên gần giống
-      if (!product && item.name) {
-        product = await Product.findOne({ 
-          name: { $regex: new RegExp(item.name, 'i') },
-          isActive: true
-        });
-        if (product) {
-          console.log(`✅ Found by name regex: ${item.name}`);
+          console.log(`✅ Found by name: ${item.name}`);
         }
       }
 
@@ -88,28 +106,27 @@ const createOrder = async (req, res) => {
         console.log(`❌ Product not found:`, item);
         return res.status(404).json({
           success: false,
-          message: `Không tìm thấy sản phẩm: ${item.name || item.productId}. Vui lòng thử lại sau.`
+          message: `Không tìm thấy sản phẩm: ${item.name || item.productId}`
         });
       }
 
-      // Kiểm tra stock
+      // Check stock
       if (product.stock !== undefined && product.stock < item.quantity) {
         return res.status(400).json({
           success: false,
-          message: `Sản phẩm "${product.name}" chỉ còn ${product.stock} trong kho, bạn đang đặt ${item.quantity}`
+          message: `Sản phẩm "${product.name}" chỉ còn ${product.stock} trong kho`
         });
       }
 
       productChecks.push({
         product: product,
-        quantity: item.quantity
+        quantity: quantityValidation.sanitized
       });
 
-      // 🔥 CREATE validated item với đầy đủ thông tin
       validatedItems.push({
         productId: product.productId || item.productId,
-        name: product.name,
-        quantity: item.quantity,
+        name: sanitizeString(product.name),
+        quantity: quantityValidation.sanitized,
         price: item.price || product.price,
         size: item.selectedSize || item.size || null,
         image: product.image || item.image
@@ -117,13 +134,13 @@ const createOrder = async (req, res) => {
     }
 
     console.log('✅ All products validated');
-    console.log('📦 Validated items:', JSON.stringify(validatedItems, null, 2));
 
-    // 🔥 FIX: Normalize paymentMethod to uppercase
+    // =====================================
+    // STEP 2: VALIDATE PAYMENT METHOD
+    // =====================================
     const normalizedPaymentMethod = (paymentMethod || 'cod').toUpperCase();
-    
-    // Validate payment method
     const validMethods = ['COD', 'BANK', 'CARD', 'MOMO', 'ZALOPAY'];
+    
     if (!validMethods.includes(normalizedPaymentMethod)) {
       return res.status(400).json({
         success: false,
@@ -131,26 +148,32 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // 🔥 Calculate totals if not provided
-    const calculatedSubtotal = subtotal || validatedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    // =====================================
+    // STEP 3: CALCULATE TOTALS
+    // =====================================
+    const calculatedSubtotal = subtotal || validatedItems.reduce(
+      (sum, item) => sum + (item.price * item.quantity), 0
+    );
     const calculatedShippingFee = shippingFee !== undefined ? shippingFee : 30000;
     const calculatedTotal = totalAmount || (calculatedSubtotal + calculatedShippingFee);
 
-    // 🔥 BƯỚC 2: TẠO ORDER
+    // =====================================
+    // STEP 4: CREATE ORDER
+    // =====================================
     const newOrder = new Order({
       userId: req.userId,
       items: validatedItems,
       shippingAddress: {
-        fullName: shippingAddress.fullName,
-        phone: shippingAddress.phone,
-        email: shippingAddress.email || '',
-        address: shippingAddress.address,
-        ward: shippingAddress.ward || 'N/A',
-        district: shippingAddress.district || 'N/A',
-        city: shippingAddress.city || 'N/A'
+        fullName: sanitizeString(shippingAddress.fullName, 100),
+        phone: sanitizeString(shippingAddress.phone, 20),
+        email: sanitizeString(shippingAddress.email || '', 255),
+        address: sanitizeString(shippingAddress.address, 500),
+        ward: sanitizeString(shippingAddress.ward || 'N/A', 100),
+        district: sanitizeString(shippingAddress.district || 'N/A', 100),
+        city: sanitizeString(shippingAddress.city || 'N/A', 100)
       },
       paymentMethod: normalizedPaymentMethod,
-      note: notes || note || '',
+      note: sanitizeString(notes || note || '', 1000),
       subtotal: calculatedSubtotal,
       shippingFee: calculatedShippingFee,
       totalAmount: calculatedTotal
@@ -158,11 +181,13 @@ const createOrder = async (req, res) => {
 
     await newOrder.save();
 
-    // 🔥 BƯỚC 3: CẬP NHẬT STOCK
+    // =====================================
+    // STEP 5: UPDATE STOCK
+    // =====================================
     for (let check of productChecks) {
-      const oldStock = check.product.stock;
-      
-      if (oldStock !== undefined) {
+      if (check.product.stock !== undefined) {
+        const oldStock = check.product.stock;
+        
         await Product.findByIdAndUpdate(
           check.product._id,
           {
@@ -192,7 +217,6 @@ const createOrder = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Create order error:', error);
-    console.error('Stack:', error.stack);
     res.status(500).json({ 
       success: false, 
       message: 'Lỗi khi tạo đơn hàng: ' + error.message
@@ -200,13 +224,19 @@ const createOrder = async (req, res) => {
   }
 };
 
-// Get user orders
+// =====================================
+// 2. GET USER ORDERS
+// =====================================
 const getUserOrders = async (req, res) => {
   try {
     console.log('🔍 Fetching orders for user:', req.userId);
 
+    // 🔒 VALIDATE limit parameter
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+
     const orders = await Order.find({ userId: req.userId })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(limit);
 
     console.log('📦 Found orders:', orders.length);
 
@@ -223,7 +253,9 @@ const getUserOrders = async (req, res) => {
   }
 };
 
-// Get order by ID
+// =====================================
+// 3. GET ORDER BY ID
+// =====================================
 const getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -236,6 +268,7 @@ const getOrderById = async (req, res) => {
       });
     }
 
+    // 🔒 CHECK AUTHORIZATION
     if (order.userId._id.toString() !== req.userId && req.role !== 'admin') {
       return res.status(403).json({ 
         success: false, 
@@ -256,22 +289,29 @@ const getOrderById = async (req, res) => {
   }
 };
 
-// Get all orders (Admin)
+// =====================================
+// 4. GET ALL ORDERS (ADMIN)
+// =====================================
 const getAllOrders = async (req, res) => {
   try {
     const { status, page = 1, limit = 20 } = req.query;
 
     let query = {};
     if (status) {
-      query.status = status;
+      query.status = sanitizeString(status);
     }
 
-    const skip = (page - 1) * limit;
+    // 🔒 VALIDATE pagination
+    const validatedPage = Math.max(parseInt(page) || 1, 1);
+    const validatedLimit = Math.min(parseInt(limit) || 20, 100);
+
+    const skip = (validatedPage - 1) * validatedLimit;
+    
     const orders = await Order.find(query)
       .populate('userId', 'name email phone')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(validatedLimit);
 
     const total = await Order.countDocuments(query);
 
@@ -280,8 +320,8 @@ const getAllOrders = async (req, res) => {
       orders,
       pagination: {
         total,
-        page: parseInt(page),
-        pages: Math.ceil(total / limit)
+        page: validatedPage,
+        pages: Math.ceil(total / validatedLimit)
       }
     });
   } catch (error) {
@@ -293,10 +333,13 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// Update order status (Admin)
+// =====================================
+// 5. UPDATE ORDER STATUS (ADMIN)
+// =====================================
 const updateOrderStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    // 🔒 SANITIZE status
+    const status = sanitizeString(req.body.status);
     
     const validStatuses = ['pending', 'confirmed', 'shipping', 'delivered', 'cancelled'];
     if (!validStatuses.includes(status)) {
@@ -347,7 +390,9 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-// Cancel order
+// =====================================
+// 6. CANCEL ORDER
+// =====================================
 const cancelOrder = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -359,6 +404,7 @@ const cancelOrder = async (req, res) => {
       });
     }
 
+    // 🔒 CHECK AUTHORIZATION
     if (order.userId.toString() !== req.userId && req.role !== 'admin') {
       return res.status(403).json({ 
         success: false, 
@@ -380,16 +426,10 @@ const cancelOrder = async (req, res) => {
       });
     }
 
-    // 🔥 HOÀN TRẢ STOCK
+    // Restore stock
     for (let item of order.items) {
-      let product = null;
+      let product = await Product.findOne({ productId: item.productId });
       
-      // Tìm theo productId
-      if (item.productId) {
-        product = await Product.findOne({ productId: item.productId });
-      }
-      
-      // Fallback: tìm theo tên
       if (!product) {
         product = await Product.findOne({ name: item.name });
       }

@@ -1,15 +1,26 @@
 {
   "name": "nyna-house-store-backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "start:dev": "nodemon index.js"
+    "start:dev": "nodemon index.js",
+    "test": "echo \"No tests yet\" && exit 0"
   },
-  "keywords": [],
+  "keywords": [
+    "ecommerce",
+    "api",
+    "nodejs",
+    "express",
+    "mongodb"
+  ],
   "author": "mamun",
   "license": "ISC",
-  "description": "",
+  "description": "NyNA House Store - Secure E-commerce Backend API with 2FA",
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
   "dependencies": {
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.3",
@@ -20,7 +31,14 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.20.1",
     "nodemailer": "^7.0.11",
-    "otp-generator": "^4.0.1"
+    "otp-generator": "^4.0.1",
+    "express-rate-limit": "^7.1.5",
+    "express-mongo-sanitize": "^2.2.0",
+    "helmet": "^7.1.0",
+    "xss-clean": "^0.1.4",
+    "validator": "^13.11.0",
+    "express-session": "^1.18.0",
+    "connect-mongo": "^5.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.11"

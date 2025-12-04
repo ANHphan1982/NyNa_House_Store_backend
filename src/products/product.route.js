@@ -11,20 +11,26 @@ const {
 } = require('./product.controller');
 const { verifyAdminToken } = require('../middleware/verifyAdminToken');
 
-console.log('✅ Product routes loaded');
+// 🔒 IMPORT SECURITY
+const { generalLimiter } = require('../config/security');
 
-// ⚠️ CRITICAL: Routes phải theo thứ tự từ cụ thể → chung
+console.log('✅ Product routes loaded with security');
 
-// 1. Public routes - SPECIFIC FIRST
-router.get('/', getAllProducts);                          // GET /api/products
-router.get('/:id/related', getRelatedProducts);           // GET /api/products/:id/related (PHẢI TRƯỚC /:id)
+// =====================================
+// CRITICAL: Route order matters
+// Specific routes BEFORE dynamic routes
+// =====================================
 
-// 2. Admin routes - SPECIFIC PATHS
-router.post('/', verifyAdminToken, createProduct);        // POST /api/products
-router.put('/:id', verifyAdminToken, updateProduct);      // PUT /api/products/:id
-router.delete('/:id', verifyAdminToken, deleteProduct);   // DELETE /api/products/:id
+// 🔒 PUBLIC ROUTES (with rate limiting)
+router.get('/', generalLimiter, getAllProducts);                    // GET /api/products
+router.get('/:id/related', generalLimiter, getRelatedProducts);     // GET /api/products/:id/related
 
-// 3. Generic route - MUST BE LAST
-router.get('/:id', getProductById);                       // GET /api/products/:id (PHẢI Ở CUỐI)
+// 🔒 ADMIN ROUTES (admin only)
+router.post('/', verifyAdminToken, createProduct);                  // POST /api/products
+router.put('/:id', verifyAdminToken, updateProduct);                // PUT /api/products/:id
+router.delete('/:id', verifyAdminToken, deleteProduct);             // DELETE /api/products/:id
+
+// 🔒 GENERIC ROUTE (MUST BE LAST)
+router.get('/:id', generalLimiter, getProductById);                 // GET /api/products/:id
 
 module.exports = router;

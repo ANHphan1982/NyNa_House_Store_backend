@@ -7,23 +7,47 @@ const jwt = require('jsonwebtoken');
 const otpGenerator = require('otp-generator');
 const { sendOTPEmail } = require('../services/emailService');
 
-// 🔥 USER LOGIN (Regular users - không cần 2FA)
-router.post('/login', async (req, res) => {
+// 🔒 IMPORT SECURITY
+const { authLimiter, emailLimiter } = require('../config/security');
+const {
+  validateEmail,
+  validatePhone,
+  validatePassword,
+  validateRegistrationData,
+  validateLoginData,
+  sanitizeString,
+  sanitizeName
+} = require('../utils/validation');
+
+console.log('✅ User routes loaded with 2FA OTP system');
+
+// =====================================
+// 1. USER LOGIN (No 2FA for regular users)
+// =====================================
+router.post('/login', authLimiter, async (req, res) => {
   try {
-    const { identifier, password } = req.body;
+    console.log('🔐 User login attempt');
 
-    console.log('🔐 User login attempt:', identifier);
+    // 🔒 SANITIZE INPUT
+    const identifier = sanitizeString(req.body.identifier, 255);
+    const password = req.body.password;
 
-    if (!identifier || !password) {
+    // 🔒 VALIDATE INPUT
+    const validation = validateLoginData({ identifier, password });
+    if (!validation.isValid) {
+      console.log('❌ Validation failed:', validation.errors);
       return res.status(400).json({
         success: false,
-        message: 'Vui lòng nhập đầy đủ thông tin'
+        message: Object.values(validation.errors)[0]
       });
     }
 
     // Find user by email or phone
     const user = await User.findOne({
-      $or: [{ email: identifier }, { phone: identifier }]
+      $or: [
+        { email: identifier.toLowerCase() },
+        { phone: identifier }
+      ]
     });
 
     if (!user) {
@@ -31,6 +55,15 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Thông tin đăng nhập không chính xác'
+      });
+    }
+
+    // Check if account is active
+    if (!user.isActive) {
+      console.log('❌ Account inactive');
+      return res.status(403).json({
+        success: false,
+        message: 'Tài khoản đã bị vô hiệu hóa'
       });
     }
 
@@ -44,31 +77,29 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    console.log('✅ Login successful');
+    console.log('✅ Login successful:', user._id);
 
     // Generate JWT token
     const token = jwt.sign(
       {
-        userId: user._id,
+        userId: user._id.toString(),
         role: user.role || 'user',
         email: user.email
       },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
-    // 🔥 ĐẢMBẢO USER OBJECT ĐẦY ĐỦ VỚI FIELD "name"
+    // User object với đầy đủ field "name"
     const userObject = {
       id: user._id.toString(),
       _id: user._id.toString(),
-      username: user.username || user.name || user.email?.split('@')[0],
+      username: user.name,
       email: user.email,
       phone: user.phone || '',
       role: user.role || 'user',
-      name: user.name || user.username || user.email?.split('@')[0] // 🔥 CRITICAL
+      name: user.name
     };
-
-    console.log('✅ Token generated for:', user.email);
 
     res.json({
       success: true,
@@ -81,68 +112,60 @@ router.post('/login', async (req, res) => {
     console.error('❌ User login error:', error);
     res.status(500).json({
       success: false,
-      message: 'Lỗi server. Vui lòng thử lại sau.'
+      message: 'Lỗi khi đăng nhập'
     });
   }
 });
 
-// 🔥 USER REGISTER - FIX VALIDATION
-router.post('/register', async (req, res) => {
+// =====================================
+// 2. USER REGISTER
+// =====================================
+router.post('/register', authLimiter, async (req, res) => {
   try {
-    const { name, phone, password, email } = req.body;
-
-    console.log('📝 Register attempt:', phone || email);
-    console.log('📦 Request body:', { 
-      name, 
-      phone: phone || 'N/A', 
-      email: email || 'N/A',
-      hasPassword: !!password 
-    });
-
-    // Validate required fields
-    if (!name || !password) {
-      return res.status(400).json({
-        success: false,
-        message: 'Vui lòng nhập đầy đủ thông tin'
-      });
-    }
-
-    if (!phone && !email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Vui lòng nhập số điện thoại hoặc email'
-      });
-    }
-
-    // 🔥 FIX: Chỉ check field nào có value thực sự
-    const checkConditions = [];
+    console.log('📝 User registration attempt');
     
-    if (email && email.trim() && email.trim() !== '') {
+    // 🔒 SANITIZE INPUT
+    const sanitizedData = {
+      name: sanitizeName(req.body.name),
+      email: req.body.email ? req.body.email.trim().toLowerCase() : '',
+      phone: req.body.phone ? req.body.phone.trim() : '',
+      password: req.body.password
+    };
+
+    console.log('🧹 Sanitized data:', { ...sanitizedData, password: '[HIDDEN]' });
+
+    // 🔒 VALIDATE INPUT
+    const validation = validateRegistrationData(sanitizedData);
+    if (!validation.isValid) {
+      console.log('❌ Validation failed:', validation.errors);
+      return res.status(400).json({
+        success: false,
+        message: Object.values(validation.errors)[0],
+        errors: validation.errors
+      });
+    }
+
+    const { name, email, phone, password } = sanitizedData;
+
+    // 🔒 CHECK DUPLICATE
+    const checkConditions = [];
+
+    if (email && email.trim() !== '') {
       checkConditions.push({ email: email.trim().toLowerCase() });
     }
-    
-    if (phone && phone.trim() && phone.trim() !== '') {
+
+    if (phone && phone.trim() !== '') {
       checkConditions.push({ phone: phone.trim() });
     }
 
     console.log('🔍 Checking existing user with conditions:', checkConditions);
 
-    // Check if user already exists - CHỈ check nếu có conditions
     let existingUser = null;
     if (checkConditions.length > 0) {
-      existingUser = await User.findOne({
-        $or: checkConditions
-      });
+      existingUser = await User.findOne({ $or: checkConditions });
     }
 
     if (existingUser) {
-      console.log('❌ User already exists:', {
-        id: existingUser._id,
-        email: existingUser.email,
-        phone: existingUser.phone
-      });
-      
-      // Determine which field is duplicated
       let duplicateField = '';
       if (existingUser.email === email?.trim().toLowerCase()) {
         duplicateField = 'Email';
@@ -152,6 +175,7 @@ router.post('/register', async (req, res) => {
         duplicateField = 'Email hoặc số điện thoại';
       }
       
+      console.log(`❌ Duplicate ${duplicateField} found`);
       return res.status(400).json({
         success: false,
         message: `${duplicateField} đã được đăng ký`
@@ -160,19 +184,15 @@ router.post('/register', async (req, res) => {
 
     console.log('✅ No existing user found, creating new user...');
 
-    // 🔥 Tạo email temp với timestamp để đảm bảo unique
-    const userEmail = email && email.trim() && email.trim() !== ''
+    // Tạo email temp nếu cần
+    const userEmail = email && email.trim() !== ''
       ? email.trim().toLowerCase()
       : `user_${phone}_${Date.now()}@temp.local`;
 
-    const userPhone = phone && phone.trim() && phone.trim() !== ''
+    const userPhone = phone && phone.trim() !== ''
       ? phone.trim()
       : null;
 
-    console.log('📧 User email:', userEmail);
-    console.log('📱 User phone:', userPhone);
-
-    // Create new user
     const user = new User({
       name: name.trim(),
       email: userEmail,
@@ -190,15 +210,14 @@ router.post('/register', async (req, res) => {
     // Generate token
     const token = jwt.sign(
       {
-        userId: user._id,
+        userId: user._id.toString(),
         role: user.role,
         email: user.email
       },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
-    // 🔥 USER OBJECT ĐẦY ĐỦ
     const userObject = {
       id: user._id.toString(),
       _id: user._id.toString(),
@@ -209,8 +228,6 @@ router.post('/register', async (req, res) => {
       name: user.name
     };
 
-    console.log('📤 Sending response with user:', userObject);
-
     res.status(201).json({
       success: true,
       message: 'Đăng ký thành công',
@@ -220,24 +237,19 @@ router.post('/register', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Register error:', error);
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    console.error('Error code:', error.code);
-    
-    // 🔥 Check for MongoDB duplicate key error
+
+    // 🔒 Handle MongoDB duplicate key error
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern || {})[0];
       const fieldName = field === 'email' ? 'Email' : field === 'phone' ? 'Số điện thoại' : 'Thông tin';
-      
-      console.error('❌ Duplicate key error on field:', field);
       
       return res.status(400).json({
         success: false,
         message: `${fieldName} đã được đăng ký`
       });
     }
-    
-    // 🔥 Check for validation errors
+
+    // 🔒 Handle validation errors
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -245,22 +257,26 @@ router.post('/register', async (req, res) => {
         message: messages.join(', ')
       });
     }
-    
+
     res.status(500).json({
       success: false,
-      message: 'Lỗi server. Vui lòng thử lại sau.'
+      message: 'Lỗi khi đăng ký: ' + error.message
     });
   }
 });
 
-// 🔥 STEP 1: Admin Login - Gửi OTP
-router.post('/admin/login', async (req, res) => {
+// =====================================
+// 3. ADMIN LOGIN - STEP 1: Send OTP
+// =====================================
+router.post('/admin/login', authLimiter, async (req, res) => {
   try {
-    const { identifier, password } = req.body;
+    console.log('🔐 Admin login attempt - Step 1: Validate credentials');
 
-    console.log('🔐 Admin login attempt:', identifier);
+    // 🔒 SANITIZE INPUT
+    const identifier = sanitizeString(req.body.identifier, 255);
+    const password = req.body.password;
 
-    // Validate input
+    // 🔒 VALIDATE INPUT
     if (!identifier || !password) {
       return res.status(400).json({
         success: false,
@@ -270,7 +286,10 @@ router.post('/admin/login', async (req, res) => {
 
     // Find admin user
     const user = await User.findOne({
-      $or: [{ email: identifier }, { phone: identifier }],
+      $or: [
+        { email: identifier.toLowerCase() },
+        { phone: identifier }
+      ],
       role: 'admin'
     });
 
@@ -302,7 +321,7 @@ router.post('/admin/login', async (req, res) => {
       specialChars: false
     });
 
-    console.log('🔢 OTP generated:', otp);
+    console.log('🔢 OTP generated');
 
     // Delete old OTPs for this user
     await OTP.deleteMany({ email: user.email, verified: false });
@@ -319,7 +338,11 @@ router.post('/admin/login', async (req, res) => {
 
     // Send OTP via email
     try {
-      await sendOTPEmail(user.email, otp, user.username || user.name || user.email.split('@')[0]);
+      await sendOTPEmail(
+        user.email, 
+        otp, 
+        user.name || user.username || user.email.split('@')[0]
+      );
       console.log('✅ OTP email sent successfully');
     } catch (emailError) {
       console.error('❌ Email sending failed:', emailError);
@@ -330,17 +353,14 @@ router.post('/admin/login', async (req, res) => {
       });
     }
 
-    // 🔥 RESPONSE với requireOTP flag
-    const responseData = {
+    // Response với requireOTP flag
+    res.json({
       success: true,
       message: 'Mã xác thực đã được gửi đến email của bạn',
       requireOTP: true,
       email: user.email.replace(/(.{2})(.*)(@.*)/, '$1***$3'), // Mask email
       expiresIn: 300 // 5 minutes in seconds
-    };
-
-    console.log('📤 Sending response:', responseData);
-    res.json(responseData);
+    });
 
   } catch (error) {
     console.error('❌ Admin login error:', error);
@@ -351,14 +371,17 @@ router.post('/admin/login', async (req, res) => {
   }
 });
 
-// 🔥 STEP 2: Verify OTP và trả về token
-router.post('/admin/verify-otp', async (req, res) => {
+// =====================================
+// 4. ADMIN LOGIN - STEP 2: Verify OTP
+// =====================================
+router.post('/admin/verify-otp', authLimiter, async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    console.log('🔐 OTP verification attempt');
 
-    console.log('🔐 OTP verification attempt:', email);
+    // 🔒 SANITIZE INPUT
+    const email = sanitizeString(req.body.email, 255).toLowerCase();
+    const otp = sanitizeString(req.body.otp, 10);
 
-    // Validate input
     if (!email || !otp) {
       return res.status(400).json({
         success: false,
@@ -417,40 +440,35 @@ router.post('/admin/verify-otp', async (req, res) => {
       });
     }
 
-    // Generate JWT token
+    // Generate JWT token with ADMIN SECRET
     const token = jwt.sign(
       {
-        userId: user._id,
+        userId: user._id.toString(),
         role: user.role,
         email: user.email
       },
       process.env.JWT_ADMIN_SECRET,
-      { expiresIn: '1d' }
+      { expiresIn: process.env.JWT_ADMIN_EXPIRES_IN || '24h' }
     );
 
-    console.log('✅ Token generated for:', user.email);
+    console.log('✅ Admin token generated');
 
-    // 🔥 ĐẢMBẢO USER OBJECT ĐẦY ĐỦ VỚI FIELD "name"
     const userObject = {
       id: user._id.toString(),
       _id: user._id.toString(),
-      username: user.username || user.email.split('@')[0],
+      username: user.name || user.username || user.email.split('@')[0],
       email: user.email,
       phone: user.phone || '',
       role: user.role,
-      name: user.name || user.username || user.email.split('@')[0] // 🔥 CRITICAL
+      name: user.name || user.username || user.email.split('@')[0]
     };
 
-    const responseData = {
+    res.json({
       success: true,
       message: 'Đăng nhập thành công',
       token,
       user: userObject
-    };
-
-    console.log('📤 Sending verify-otp response with user:', userObject);
-
-    res.json(responseData);
+    });
 
   } catch (error) {
     console.error('❌ OTP verification error:', error);
@@ -461,12 +479,15 @@ router.post('/admin/verify-otp', async (req, res) => {
   }
 });
 
-// 🔥 STEP 3: Resend OTP
-router.post('/admin/resend-otp', async (req, res) => {
+// =====================================
+// 5. ADMIN LOGIN - STEP 3: Resend OTP
+// =====================================
+router.post('/admin/resend-otp', emailLimiter, async (req, res) => {
   try {
-    const { email } = req.body;
+    console.log('🔄 Resend OTP request');
 
-    console.log('🔄 Resend OTP request:', email);
+    // 🔒 SANITIZE INPUT
+    const email = sanitizeString(req.body.email, 255).toLowerCase();
 
     if (!email) {
       return res.status(400).json({
@@ -484,10 +505,10 @@ router.post('/admin/resend-otp', async (req, res) => {
       });
     }
 
-    // Check rate limit (không cho gửi quá nhanh)
+    // Check rate limit (1 minute between requests)
     const recentOTP = await OTP.findOne({
       email,
-      createdAt: { $gt: new Date(Date.now() - 60 * 1000) } // 1 minute ago
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) }
     });
 
     if (recentOTP) {
@@ -517,7 +538,11 @@ router.post('/admin/resend-otp', async (req, res) => {
     });
 
     // Send email
-    await sendOTPEmail(user.email, otp, user.username || user.name || user.email.split('@')[0]);
+    await sendOTPEmail(
+      user.email, 
+      otp, 
+      user.name || user.username || user.email.split('@')[0]
+    );
 
     console.log('✅ OTP resent successfully');
 
@@ -535,13 +560,15 @@ router.post('/admin/resend-otp', async (req, res) => {
   }
 });
 
-// 🔍 DEBUG ROUTES (Xóa sau khi test xong)
+// =====================================
+// 6. DEBUG ROUTES (Delete after testing)
+// =====================================
 router.get('/debug/check-phone/:phone', async (req, res) => {
   try {
-    const { phone } = req.params;
+    const phone = sanitizeString(req.params.phone, 20);
     console.log('🔍 Checking phone:', phone);
     
-    const user = await User.findOne({ phone: phone });
+    const user = await User.findOne({ phone });
     
     res.json({
       exists: !!user,
@@ -560,10 +587,10 @@ router.get('/debug/check-phone/:phone', async (req, res) => {
 
 router.get('/debug/check-email/:email', async (req, res) => {
   try {
-    const { email } = req.params;
+    const email = sanitizeString(req.params.email, 255).toLowerCase();
     console.log('🔍 Checking email:', email);
     
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email });
     
     res.json({
       exists: !!user,
