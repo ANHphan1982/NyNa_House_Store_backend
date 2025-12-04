@@ -479,6 +479,82 @@ const validateOrderData = (orderData) => {
     message: errors.length === 0 ? 'Dữ liệu đơn hàng hợp lệ' : errors.join('; ')
   };
 };
+// ✅ VALIDATE LOGIN DATA
+const validateLoginData = (data) => {
+  const errors = {};
+  
+  if (!data.identifier || typeof data.identifier !== 'string') {
+    errors.identifier = 'Vui lòng nhập email hoặc số điện thoại';
+  } else if (data.identifier.trim().length === 0) {
+    errors.identifier = 'Email/Số điện thoại không được để trống';
+  } else if (data.identifier.length > 255) {
+    errors.identifier = 'Email/Số điện thoại quá dài';
+  }
+  
+  if (!data.password || typeof data.password !== 'string') {
+    errors.password = 'Vui lòng nhập mật khẩu';
+  } else if (data.password.length < 6) {
+    errors.password = 'Mật khẩu phải có ít nhất 6 ký tự';
+  }
+  
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors
+  };
+};
+
+// ✅ VALIDATE REGISTRATION DATA
+const validateRegistrationData = (data) => {
+  const errors = {};
+  
+  // Validate name
+  if (!data.name || typeof data.name !== 'string') {
+    errors.name = 'Họ tên là bắt buộc';
+  } else {
+    const trimmedName = data.name.trim();
+    if (trimmedName.length < 2) {
+      errors.name = 'Họ tên phải có ít nhất 2 ký tự';
+    } else if (trimmedName.length > 100) {
+      errors.name = 'Họ tên không được quá 100 ký tự';
+    }
+  }
+  
+  // Must have either email OR phone
+  if (!data.email && !data.phone) {
+    errors.contact = 'Vui lòng nhập email hoặc số điện thoại';
+  }
+  
+  // Validate email if provided
+  if (data.email) {
+    const emailResult = validateEmail(data.email);
+    if (!emailResult.isValid) {
+      errors.email = emailResult.message;
+    }
+  }
+  
+  // Validate phone if provided
+  if (data.phone) {
+    const phoneResult = validatePhone(data.phone);
+    if (!phoneResult.isValid) {
+      errors.phone = phoneResult.message;
+    }
+  }
+  
+  // Validate password
+  if (!data.password) {
+    errors.password = 'Mật khẩu là bắt buộc';
+  } else {
+    const passwordResult = validatePassword(data.password);
+    if (!passwordResult.isValid) {
+      errors.password = passwordResult.message;
+    }
+  }
+  
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors
+  };
+};
 
 // 🔥 EXPORTS - THÊM validateNumber
 module.exports = {
@@ -494,5 +570,10 @@ module.exports = {
   validateQuantity,
   validateProductId,
   validateNumber,      // 🔥 THÊM DÒNG NÀY
+  validateOrderData,
+  validateLoginData,         // 🔥 THÊM DÒNG NÀY
+  validateRegistrationData,  // 🔥 THÊM DÒNG NÀY
   validateOrderData
+  
+  
 };
