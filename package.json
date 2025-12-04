@@ -2,6 +2,10 @@
   "name": "nyna-house-store-backend",
   "version": "2.0.0",
   "main": "index.js",
+  "engines": {
+    "node": "20.x",
+    "npm": ">=8.0.0"
+  },
   "scripts": {
     "start": "node index.js",
     "start:dev": "nodemon index.js",
@@ -17,10 +21,6 @@
   "author": "mamun",
   "license": "ISC",
   "description": "NyNA House Store - Secure E-commerce Backend API with 2FA",
-  "engines": {
-    "node": ">=16.0.0",
-    "npm": ">=8.0.0"
-  },
   "dependencies": {
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.3",
