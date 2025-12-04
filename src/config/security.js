@@ -104,6 +104,7 @@ const getCorsOptions = () => {
     process.env.FRONTEND_URL,
     'http://localhost:5173',
     'http://localhost:3000',
+    'https://ny-na-house-store-frontend.vercel.app',
     'https://ny-na-house-store-frontend-git-main-phan-anhs-projects-2ab2071f.vercel.app'
   ].filter(Boolean); // Remove undefined
 
