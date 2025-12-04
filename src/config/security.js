@@ -231,9 +231,25 @@ const setupTrustProxy = (app) => {
   }
 };
 
+// 🔥 THÊM ALIASES ĐỂ DỄ IMPORT
+const generalLimiter = rateLimiters.general;
+const authLimiter = rateLimiters.auth;
+const registerLimiter = rateLimiters.register;
+const orderLimiter = rateLimiters.orders;
+const otpLimiter = rateLimiters.otp;
+const adminLimiter = rateLimiters.admin;
+
+// 🔥 EXPORT TẤT CẢ (THÊM ALIASES)
 module.exports = {
   setupSecurity,
   getRateLimiter,
   rateLimiters,
-  setupTrustProxy
+  setupTrustProxy,
+  // 🔥 Export aliases để dễ import
+  generalLimiter,
+  authLimiter,
+  registerLimiter,
+  orderLimiter,
+  otpLimiter,
+  adminLimiter
 };
