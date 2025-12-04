@@ -295,29 +295,105 @@ router.post('/register', authLimiter, async (req, res) => {
 });
 
 // =====================================
-// ROUTE 3: ADMIN LOGIN - Step 1 (Send OTP)
+// ROUTE 3: ADMIN LOGIN - Step 1 (Send OTP) 🔥 WITH DEBUG
 // =====================================
 router.post('/admin/login', authLimiter, async (req, res) => {
   try {
     console.log('🔐 Admin login attempt - Step 1: Validate credentials');
+    console.log('═══════════════════════════════════════════════════════');
     
     const { identifier, password } = req.body;
+
+    // 🔥 DEBUG - Raw input
+    console.log('📥 RAW INPUT:');
+    console.log('   Identifier:', identifier);
+    console.log('   Identifier length:', identifier?.length);
+    console.log('   Password exists:', !!password);
+    console.log('   Password length:', password?.length);
 
     // ✅ Validate input
     const validation = validateLoginData({ identifier, password });
     if (!validation.isValid) {
+      console.log('❌ Validation failed:', validation.errors);
       return res.status(400).json({
         success: false,
         message: Object.values(validation.errors)[0]
       });
     }
 
+    console.log('✅ Validation passed');
+
     // ✅ Clean identifier (preserve dots for email)
     const cleanIdentifier = identifier.trim().toLowerCase();
     
-    console.log('📧 Looking for admin:', cleanIdentifier);
+    console.log('📧 CLEANED INPUT:');
+    console.log('   Clean identifier:', cleanIdentifier);
+    console.log('   Clean identifier length:', cleanIdentifier.length);
 
-    // Find admin user
+    // 🔥 DEBUG - Test various queries
+    console.log('🔍 TESTING QUERIES:');
+    
+    // Test 1: Find by email only (no conditions)
+    const testEmail = await User.findOne({ email: cleanIdentifier });
+    console.log('   Test 1 - Email only:', !!testEmail);
+    if (testEmail) {
+      console.log('      → Found user:', {
+        id: testEmail._id,
+        email: testEmail.email,
+        role: testEmail.role,
+        isActive: testEmail.isActive
+      });
+    }
+
+    // Test 2: Find by role only
+    const testRole = await User.findOne({ role: 'admin' });
+    console.log('   Test 2 - Role only:', !!testRole);
+    if (testRole) {
+      console.log('      → Found admin:', {
+        id: testRole._id,
+        email: testRole.email,
+        role: testRole.role,
+        isActive: testRole.isActive
+      });
+    }
+
+    // Test 3: Find by email + role
+    const testEmailRole = await User.findOne({ 
+      email: cleanIdentifier,
+      role: 'admin'
+    });
+    console.log('   Test 3 - Email + Role:', !!testEmailRole);
+    if (testEmailRole) {
+      console.log('      → Found:', {
+        id: testEmailRole._id,
+        email: testEmailRole.email,
+        role: testEmailRole.role,
+        isActive: testEmailRole.isActive
+      });
+    }
+
+    // Test 4: Count all admins
+    const adminCount = await User.countDocuments({ role: 'admin' });
+    console.log('   Test 4 - Admin count:', adminCount);
+
+    // Test 5: List all admins
+    const allAdmins = await User.find({ role: 'admin' }).select('email role isActive');
+    console.log('   Test 5 - All admins:');
+    allAdmins.forEach((admin, index) => {
+      console.log(`      ${index + 1}. ${admin.email} | role: ${admin.role} | active: ${admin.isActive}`);
+    });
+
+    console.log('🎯 FINAL QUERY:');
+    console.log('   Query object:', JSON.stringify({
+      $or: [
+        { email: cleanIdentifier },
+        { phone: identifier.trim() }
+      ],
+      role: 'admin',
+      isActive: true
+    }, null, 2));
+
+    // Find admin user with final query
     const user = await User.findOne({
       $or: [
         { email: cleanIdentifier },
@@ -327,12 +403,24 @@ router.post('/admin/login', authLimiter, async (req, res) => {
       isActive: true
     });
 
+    console.log('🔎 FINAL RESULT:', !!user);
+    if (user) {
+      console.log('   User found:', {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        isActive: user.isActive
+      });
+    }
+
     if (!user) {
-      console.log('❌ Admin not found with identifier:', cleanIdentifier);
-      
-      // 🔍 DEBUG: Count admins
-      const adminCount = await User.countDocuments({ role: 'admin' });
-      console.log('📊 Total admins in DB:', adminCount);
+      console.log('❌ ADMIN NOT FOUND');
+      console.log('   Possible reasons:');
+      console.log('   1. Email mismatch (check Test 1)');
+      console.log('   2. Role is not "admin" (check Test 2)');
+      console.log('   3. isActive is not true');
+      console.log('   4. Admin does not exist (check Test 4 & 5)');
+      console.log('═══════════════════════════════════════════════════════');
       
       return res.status(401).json({
         success: false,
@@ -352,7 +440,9 @@ router.post('/admin/login', authLimiter, async (req, res) => {
     }
 
     // Verify password
+    console.log('🔑 Verifying password...');
     const isPasswordValid = await user.comparePassword(password);
+    console.log('🔑 Password valid:', isPasswordValid);
     
     if (!isPasswordValid) {
       console.log('❌ Invalid password');
@@ -423,6 +513,7 @@ router.post('/admin/login', authLimiter, async (req, res) => {
     const maskedEmail = user.email.replace(/(.{3})(.*)(@.*)/, '$1***$3');
 
     console.log('✅ Step 1 complete - OTP sent');
+    console.log('═══════════════════════════════════════════════════════');
 
     res.json({
       success: true,
@@ -434,6 +525,7 @@ router.post('/admin/login', authLimiter, async (req, res) => {
 
   } catch (error) {
     console.error('❌ Admin login error:', error);
+    console.error('Stack trace:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
