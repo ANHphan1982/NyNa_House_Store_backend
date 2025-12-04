@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('./user.model');
 const jwt = require('jsonwebtoken');
-const { verifyToken } = require('../middleware/verifyToken');
+const { verifyToken } = require('../middleware/verifyAdminToken');
 const nodemailer = require('nodemailer');
 const otpGenerator = require('otp-generator');
 
