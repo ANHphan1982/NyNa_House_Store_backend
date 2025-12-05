@@ -5,7 +5,7 @@ const router = express.Router();
 const { 
   verifyToken, 
   verifyAdminToken,
-  verifyTokenOrAdmin // 🔥 NEW: Import new middleware
+  verifyTokenOrAdmin
 } = require('../middleware/verifyAdminToken');
 
 const {
@@ -29,8 +29,9 @@ router.get('/', verifyAdminToken, getAllOrders);
 // Alternative admin endpoint
 router.get('/admin/all', verifyAdminToken, getAllOrders);
 
-// Update order status (Admin only)
-router.patch('/admin/:id/status', verifyAdminToken, updateOrderStatus);
+// Update order status - Both routes supported
+router.patch('/:id/status', verifyAdminToken, updateOrderStatus); // 🔥 NEW: Without /admin
+router.patch('/admin/:id/status', verifyAdminToken, updateOrderStatus); // Keep old route
 
 // =====================================
 // USER ROUTES (Specific before generic)
@@ -50,7 +51,7 @@ router.post('/:id/cancel', verifyTokenOrAdmin, cancelOrder);
 // GENERIC ROUTES (LAST!)
 // =====================================
 
-// Get order by ID (User or Admin) 🔥 FIXED: Use verifyTokenOrAdmin
+// Get order by ID (User or Admin)
 router.get('/:id', verifyTokenOrAdmin, getOrderById);
 
 module.exports = router;
