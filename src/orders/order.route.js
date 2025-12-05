@@ -2,10 +2,7 @@
 const express = require('express');
 const router = express.Router();
 
-// 🔒 IMPORT MIDDLEWARE
 const { verifyToken, verifyAdminToken } = require('../middleware/verifyAdminToken');
-
-// 🔒 IMPORT CONTROLLER
 const {
   createOrder,
   getUserOrders,
@@ -18,29 +15,19 @@ const {
 console.log('✅ Order routes loaded');
 
 // =====================================
-// USER ROUTES
+// USER ROUTES (specific routes FIRST)
 // =====================================
 
-// Create order (authenticated users)
+// 🔥 IMPORTANT: Specific routes BEFORE generic /:id
 router.post('/', verifyToken, createOrder);
-
-// Get user's orders
-router.get('/my-orders', verifyToken, getUserOrders);
-
-// Get order by ID
-router.get('/:id', verifyToken, getOrderById);
-
-// Cancel order
-router.post('/:id/cancel', verifyToken, cancelOrder);
+router.get('/my-orders', verifyToken, getUserOrders);  // ← BEFORE /:id
+router.post('/:id/cancel', verifyToken, cancelOrder);  // ← BEFORE /:id
+router.get('/:id', verifyToken, getOrderById);          // ← AFTER specific routes
 
 // =====================================
 // ADMIN ROUTES
 // =====================================
-
-// Get all orders (admin)
 router.get('/admin/all', verifyAdminToken, getAllOrders);
-
-// Update order status (admin)
 router.patch('/admin/:id/status', verifyAdminToken, updateOrderStatus);
 
 module.exports = router;

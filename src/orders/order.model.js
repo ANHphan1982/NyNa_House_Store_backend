@@ -1,44 +1,41 @@
 // backend/src/orders/order.model.js
 const mongoose = require('mongoose');
 
-const orderItemSchema = new mongoose.Schema({
-  productId: {
-    type: Number,  // 🔥 ĐỔI: Frontend dùng Number ID, không phải ObjectId
-    required: true
-  },
-  name: {
-    type: String,
-    required: true
-  },
-  quantity: {
-    type: Number,
-    required: true,
-    min: 1
-  },
-  price: {
-    type: Number,
-    required: true,
-    min: 0
-  },
-  size: {
-    type: String,
-    default: null  // 🔥 THÊM: default null
-  },
-  image: {
-    type: String,
-    required: true  // 🔥 THÊM: required
-  }
-});
-
 const orderSchema = new mongoose.Schema({
-  userId: {  // 🔥 ĐỔI TÊN: từ user -> userId
+  userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  items: [orderItemSchema],
+  items: [{
+    productId: {
+      type: mongoose.Schema.Types.ObjectId, // 🔥 FIXED: ObjectId thay vì Number
+      ref: 'Product',
+      required: true
+    },
+    name: {
+      type: String,
+      required: true
+    },
+    price: {
+      type: Number,
+      required: true
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1
+    },
+    size: {
+      type: String,
+      default: 'M'
+    },
+    image: {
+      type: String
+    }
+  }],
   shippingAddress: {
-    fullName: {  // 🔥 ĐỔI TÊN: từ name -> fullName
+    fullName: {
       type: String,
       required: true
     },
@@ -46,53 +43,31 @@ const orderSchema = new mongoose.Schema({
       type: String,
       required: true
     },
-    email: {  // 🔥 THÊM: field email
+    email: {
       type: String
     },
     address: {
       type: String,
       required: true
     },
-    ward: {  // 🔥 ĐỔI: bắt buộc phải có
-      type: String,
-      required: true
+    ward: {
+      type: String
     },
-    district: {  // 🔥 ĐỔI: bắt buộc phải có
-      type: String,
-      required: true
+    district: {
+      type: String
     },
     city: {
-      type: String,
-      required: true
+      type: String
     }
   },
   paymentMethod: {
     type: String,
-    required: true,
-    enum: ['COD', 'BANK', 'CARD', 'Momo', 'ZaloPay'],  // 🔥 THÊM: BANK, CARD
+    enum: ['COD', 'BANK', 'CARD', 'MOMO', 'ZALOPAY'],
     default: 'COD'
   },
-  note: {  // 🔥 ĐỔI TÊN: từ notes -> note
-    type: String
-  },
-  subtotal: {  // 🔥 THÊM: subtotal riêng
-    type: Number,
-    required: true,
-    min: 0
-  },
-  shippingFee: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  totalAmount: {  // 🔥 ĐỔI: totalAmount là tổng cuối cùng
-    type: Number,
-    required: true,
-    min: 0
-  },
-  status: {
+  paymentStatus: {
     type: String,
-    enum: ['pending', 'confirmed', 'shipping', 'delivered', 'cancelled'],  // 🔥 BỎ: processing
+    enum: ['pending', 'paid', 'failed'],
     default: 'pending'
   },
   isPaid: {
@@ -102,15 +77,62 @@ const orderSchema = new mongoose.Schema({
   paidAt: {
     type: Date
   },
+  subtotal: {
+    type: Number,
+    required: true,
+    default: 0
+  },
+  shippingFee: {
+    type: Number,
+    default: 30000
+  },
+  totalAmount: {
+    type: Number,
+    required: true
+  },
+  note: {
+    type: String,
+    maxlength: 1000
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'confirmed', 'shipping', 'delivered', 'cancelled'],
+    default: 'pending'
+  },
+  confirmedAt: {
+    type: Date
+  },
+  shippedAt: {
+    type: Date
+  },
   deliveredAt: {
     type: Date
   },
-  cancelledAt: {  // 🔥 THÊM: cancelledAt
+  cancelledAt: {
     type: Date
+  },
+  cancelReason: {
+    type: String,
+    maxlength: 500
   }
 }, {
   timestamps: true
 });
+
+// 🔒 INDEXES
+orderSchema.index({ userId: 1, createdAt: -1 });
+orderSchema.index({ status: 1 });
+orderSchema.index({ 'items.productId': 1 });
+orderSchema.index({ createdAt: -1 });
+
+// 🔒 VIRTUAL: orderNumber
+orderSchema.virtual('orderNumber').get(function() {
+  return this._id.toString().slice(-8).toUpperCase();
+});
+
+// 🔒 Convert to JSON with virtuals
+orderSchema.set('toJSON', { virtuals: true });
+orderSchema.set('toObject', { virtuals: true });
 
 const Order = mongoose.model('Order', orderSchema);
 
