@@ -1,80 +1,82 @@
-// backend/src/orders/order.route.js
-const express = require('express');
-const router = express.Router();
-const {
-  createOrder,
-  getUserOrders,
-  getOrderById,
-  getAllOrders,
-  updateOrderStatus,
-  cancelOrder
-} = require('./order.controller');
-const { verifyToken, verifyAdminToken } = require('../middleware/verifyAdminToken');
+router.post('/', verifyToken, async (req, res) => {
+  try {
+    const { products, shippingAddress, paymentMethod } = req.body;
 
-// 🔒 IMPORT SECURITY
-const { orderLimiter } = require('../config/security');
+    // 🔥 VALIDATE AND CONVERT products
+    const validatedProducts = [];
+    
+    for (const item of products) {
+      let product;
+      
+      // 🔥 TRY productId (Number) FIRST
+      if (item.productId && !isNaN(item.productId)) {
+        product = await Product.findOne({ productId: Number(item.productId) });
+      }
+      
+      // 🔥 FALLBACK: Try _id (ObjectId)
+      if (!product && mongoose.Types.ObjectId.isValid(item.productId)) {
+        product = await Product.findById(item.productId);
+      }
 
-console.log('✅ Order routes loaded with security');
-
-// =====================================
-// IMPORTANT: Route order matters
-// Specific routes BEFORE dynamic routes
-// =====================================
-
-// 🔒 USER ROUTES with rate limiting
-router.post('/', verifyToken, orderLimiter, createOrder);          // Create order (max 10/hour)
-router.get('/user', verifyToken, getUserOrders);                   // Get user's orders
-router.patch('/:id/cancel', verifyToken, cancelOrder);             // Cancel order
-
-// 🔒 ADMIN ROUTES
-router.get('/', verifyAdminToken, getAllOrders);                   // Get all orders (admin only)
-router.patch('/:id/status', verifyAdminToken, updateOrderStatus);  // Update status (admin only)
-
-// 🔒 GET BY ID - Flexible middleware (user or admin)
-router.get('/:id', verifyTokenFlexible, getOrderById);
-
-module.exports = router;
-
-// =====================================
-// 🔒 FLEXIBLE TOKEN VERIFICATION
-// Allows both user and admin tokens
-// =====================================
-function verifyTokenFlexible(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1];
-  
-  if (!token) {
-    console.log('❌ No token provided');
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Không tìm thấy token xác thực' 
-    });
-  }
-
-  const jwt = require('jsonwebtoken');
-
-  // Try JWT_ADMIN_SECRET first (for admin)
-  jwt.verify(token, process.env.JWT_ADMIN_SECRET, (err, decoded) => {
-    if (!err) {
-      console.log('✅ Verified with JWT_ADMIN_SECRET (Admin)');
-      req.userId = decoded.userId;
-      req.role = decoded.role || 'admin';
-      return next();
-    }
-
-    // Try JWT_SECRET (for user)
-    jwt.verify(token, process.env.JWT_SECRET, (err2, decoded2) => {
-      if (err2) {
-        console.log('❌ Token verification failed:', err2.message);
-        return res.status(401).json({ 
-          success: false, 
-          message: 'Token không hợp lệ hoặc đã hết hạn' 
+      if (!product) {
+        return res.status(400).json({
+          success: false,
+          message: `Sản phẩm không tồn tại: ${item.productId}`
         });
       }
 
-      console.log('✅ Verified with JWT_SECRET (User)');
-      req.userId = decoded2.userId;
-      req.role = decoded2.role || 'user';
-      next();
+      // Check stock
+      if (product.stock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Sản phẩm "${product.name}" không đủ hàng`
+        });
+      }
+
+      validatedProducts.push({
+        productId: product.productId || product._id, // Use numeric ID if exists
+        _id: product._id, // Keep ObjectId for reference
+        name: product.name,
+        price: product.price,
+        quantity: item.quantity,
+        size: item.size || 'M'
+      });
+    }
+
+    // Create order with validated products
+    const order = new Order({
+      userId: req.userId,
+      items: validatedProducts.map(p => ({
+        productId: p._id, // Store ObjectId in order
+        quantity: p.quantity,
+        size: p.size,
+        price: p.price
+      })),
+      shippingAddress,
+      paymentMethod,
+      totalAmount: validatedProducts.reduce((sum, p) => sum + (p.price * p.quantity), 0)
     });
-  });
-}
+
+    await order.save();
+
+    // Update stock
+    for (const item of validatedProducts) {
+      await Product.findByIdAndUpdate(item._id, {
+        $inc: { stock: -item.quantity }
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Đặt hàng thành công',
+      order: order
+    });
+
+  } catch (error) {
+    console.error('❌ Checkout error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi tạo đơn hàng: ' + error.message
+    });
+  }
+});
