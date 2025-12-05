@@ -15,19 +15,26 @@ const {
 console.log('✅ Order routes loaded');
 
 // =====================================
-// USER ROUTES (specific routes FIRST)
+// 🔥 CRITICAL: SPECIFIC ROUTES FIRST!
 // =====================================
 
-// 🔥 IMPORTANT: Specific routes BEFORE generic /:id
+// Create order
 router.post('/', verifyToken, createOrder);
-router.get('/my-orders', verifyToken, getUserOrders);  // ← BEFORE /:id
-router.post('/:id/cancel', verifyToken, cancelOrder);  // ← BEFORE /:id
-router.get('/:id', verifyToken, getOrderById);          // ← AFTER specific routes
 
-// =====================================
-// ADMIN ROUTES
-// =====================================
+// Get user's orders - MUST be before /:id
+router.get('/my-orders', verifyToken, getUserOrders);
+router.get('/user', verifyToken, getUserOrders); // 🔥 ADD: Support /user endpoint
+
+// Cancel order - MUST be before /:id
+router.post('/:id/cancel', verifyToken, cancelOrder);
+
+// Admin routes - MUST be before /:id
 router.get('/admin/all', verifyAdminToken, getAllOrders);
 router.patch('/admin/:id/status', verifyAdminToken, updateOrderStatus);
+
+// =====================================
+// 🔥 GENERIC /:id ROUTE LAST!
+// =====================================
+router.get('/:id', verifyToken, getOrderById);
 
 module.exports = router;
