@@ -1,6 +1,7 @@
 // backend/src/orders/order.controller.js
 const Order = require('./order.model');
 const Product = require('../products/product.model');
+const mongoose = require('mongoose');
 
 // 🔒 IMPORT VALIDATION
 const {
@@ -82,28 +83,54 @@ const createOrder = async (req, res) => {
         });
       }
 
-      // Find product
+      // 🔥 FIX: FIND PRODUCT - Handle both ObjectId and Number
       let product = null;
       
       if (item.productId) {
-        product = await Product.findOne({ productId: item.productId });
-        if (product) {
-          console.log(`✅ Found by productId: ${item.productId}`);
+        // Check if productId is ObjectId (24 character hex string)
+        if (mongoose.Types.ObjectId.isValid(item.productId) && 
+            typeof item.productId === 'string' && 
+            item.productId.length === 24) {
+          
+          console.log(`   → Querying by _id (ObjectId): ${item.productId}`);
+          product = await Product.findOne({ 
+            _id: item.productId,
+            isActive: true
+          });
+          
+          if (product) {
+            console.log(`   ✅ Found by _id: ${product.name}`);
+          }
+        } 
+        // Check if productId is a number
+        else if (!isNaN(item.productId)) {
+          console.log(`   → Querying by productId (Number): ${item.productId}`);
+          product = await Product.findOne({ 
+            productId: Number(item.productId),
+            isActive: true
+          });
+          
+          if (product) {
+            console.log(`   ✅ Found by productId: ${product.name}`);
+          }
         }
       }
       
+      // Fallback: Try finding by name
       if (!product && item.name) {
+        console.log(`   → Fallback: Querying by name: ${item.name}`);
         product = await Product.findOne({ 
           name: item.name,
           isActive: true
         });
+        
         if (product) {
-          console.log(`✅ Found by name: ${item.name}`);
+          console.log(`   ✅ Found by name: ${product.name}`);
         }
       }
 
       if (!product) {
-        console.log(`❌ Product not found:`, item);
+        console.log(`   ❌ Product not found:`, item);
         return res.status(404).json({
           success: false,
           message: `Không tìm thấy sản phẩm: ${item.name || item.productId}`
@@ -120,13 +147,13 @@ const createOrder = async (req, res) => {
 
       productChecks.push({
         product: product,
-        quantity: quantityValidation.sanitized
+        quantity: quantityValidation.value || item.quantity
       });
 
       validatedItems.push({
-        productId: product.productId || item.productId,
+        productId: product._id, // 🔥 Always use _id (ObjectId) for order items
         name: sanitizeString(product.name),
-        quantity: quantityValidation.sanitized,
+        quantity: quantityValidation.value || item.quantity,
         price: item.price || product.price,
         size: item.selectedSize || item.size || null,
         image: product.image || item.image
@@ -157,6 +184,12 @@ const createOrder = async (req, res) => {
     const calculatedShippingFee = shippingFee !== undefined ? shippingFee : 30000;
     const calculatedTotal = totalAmount || (calculatedSubtotal + calculatedShippingFee);
 
+    console.log('💰 Order totals:', {
+      subtotal: calculatedSubtotal,
+      shippingFee: calculatedShippingFee,
+      total: calculatedTotal
+    });
+
     // =====================================
     // STEP 4: CREATE ORDER
     // =====================================
@@ -180,6 +213,7 @@ const createOrder = async (req, res) => {
     });
 
     await newOrder.save();
+    console.log('✅ Order saved:', newOrder._id);
 
     // =====================================
     // STEP 5: UPDATE STOCK
@@ -202,7 +236,7 @@ const createOrder = async (req, res) => {
       }
     }
 
-    console.log('✅ Order created:', newOrder._id);
+    console.log('✅ Order created successfully:', newOrder._id);
 
     res.status(201).json({
       success: true,
@@ -428,10 +462,31 @@ const cancelOrder = async (req, res) => {
 
     // Restore stock
     for (let item of order.items) {
-      let product = await Product.findOne({ productId: item.productId });
+      // 🔥 FIX: Handle both ObjectId and Number productId
+      let product = null;
       
-      if (!product) {
-        product = await Product.findOne({ name: item.name });
+      // Try finding by _id (ObjectId) first
+      if (mongoose.Types.ObjectId.isValid(item.productId)) {
+        product = await Product.findOne({ 
+          _id: item.productId,
+          isActive: true 
+        });
+      }
+      
+      // Fallback: Try productId (Number)
+      if (!product && !isNaN(item.productId)) {
+        product = await Product.findOne({ 
+          productId: Number(item.productId),
+          isActive: true 
+        });
+      }
+      
+      // Last resort: Try name
+      if (!product && item.name) {
+        product = await Product.findOne({ 
+          name: item.name,
+          isActive: true 
+        });
       }
 
       if (product && product.stock !== undefined) {
