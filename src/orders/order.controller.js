@@ -302,13 +302,18 @@ const getOrderById = async (req, res) => {
       });
     }
 
-    // 🔒 CHECK AUTHORIZATION
-    if (order.userId._id.toString() !== req.userId && req.role !== 'admin') {
+    // 🔥 UPDATED: Allow admin to view any order
+    const isAdmin = req.role === 'admin' || req.isAdmin;
+    const isOwner = order.userId._id.toString() === req.userId;
+
+    if (!isAdmin && !isOwner) {
       return res.status(403).json({ 
         success: false, 
         message: 'Bạn không có quyền xem đơn hàng này' 
       });
     }
+
+    console.log(`✅ Order details retrieved by ${isAdmin ? 'Admin' : 'User'}`);
 
     res.json({
       success: true,
