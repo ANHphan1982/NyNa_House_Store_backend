@@ -15,26 +15,37 @@ const {
 console.log('✅ Order routes loaded');
 
 // =====================================
-// 🔥 CRITICAL: SPECIFIC ROUTES FIRST!
+// ADMIN ROUTES (Must be FIRST!)
+// =====================================
+
+// 🔥 NEW: GET /api/orders?page=1&limit=20 (Admin get all)
+router.get('/', verifyAdminToken, getAllOrders);
+
+// Alternative admin endpoint (backward compatible)
+router.get('/admin/all', verifyAdminToken, getAllOrders);
+
+// Update order status
+router.patch('/admin/:id/status', verifyAdminToken, updateOrderStatus);
+
+// =====================================
+// USER ROUTES (Specific before generic)
 // =====================================
 
 // Create order
 router.post('/', verifyToken, createOrder);
 
-// Get user's orders - MUST be before /:id
+// Get user's orders
 router.get('/my-orders', verifyToken, getUserOrders);
-router.get('/user', verifyToken, getUserOrders); // 🔥 ADD: Support /user endpoint
+router.get('/user', verifyToken, getUserOrders);
 
-// Cancel order - MUST be before /:id
+// Cancel order
 router.post('/:id/cancel', verifyToken, cancelOrder);
 
-// Admin routes - MUST be before /:id
-router.get('/admin/all', verifyAdminToken, getAllOrders);
-router.patch('/admin/:id/status', verifyAdminToken, updateOrderStatus);
+// =====================================
+// GENERIC ROUTES (LAST!)
+// =====================================
 
-// =====================================
-// 🔥 GENERIC /:id ROUTE LAST!
-// =====================================
+// Get order by ID
 router.get('/:id', verifyToken, getOrderById);
 
 module.exports = router;
