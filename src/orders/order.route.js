@@ -1,82 +1,46 @@
-router.post('/', verifyToken, async (req, res) => {
-  try {
-    const { products, shippingAddress, paymentMethod } = req.body;
+// backend/src/orders/order.route.js
+const express = require('express');
+const router = express.Router();
 
-    // 🔥 VALIDATE AND CONVERT products
-    const validatedProducts = [];
-    
-    for (const item of products) {
-      let product;
-      
-      // 🔥 TRY productId (Number) FIRST
-      if (item.productId && !isNaN(item.productId)) {
-        product = await Product.findOne({ productId: Number(item.productId) });
-      }
-      
-      // 🔥 FALLBACK: Try _id (ObjectId)
-      if (!product && mongoose.Types.ObjectId.isValid(item.productId)) {
-        product = await Product.findById(item.productId);
-      }
+// 🔒 IMPORT MIDDLEWARE
+const { verifyToken, verifyAdminToken } = require('../middleware/verifyAdminToken');
 
-      if (!product) {
-        return res.status(400).json({
-          success: false,
-          message: `Sản phẩm không tồn tại: ${item.productId}`
-        });
-      }
+// 🔒 IMPORT CONTROLLER
+const {
+  createOrder,
+  getUserOrders,
+  getOrderById,
+  getAllOrders,
+  updateOrderStatus,
+  cancelOrder
+} = require('./order.controller');
 
-      // Check stock
-      if (product.stock < item.quantity) {
-        return res.status(400).json({
-          success: false,
-          message: `Sản phẩm "${product.name}" không đủ hàng`
-        });
-      }
+console.log('✅ Order routes loaded');
 
-      validatedProducts.push({
-        productId: product.productId || product._id, // Use numeric ID if exists
-        _id: product._id, // Keep ObjectId for reference
-        name: product.name,
-        price: product.price,
-        quantity: item.quantity,
-        size: item.size || 'M'
-      });
-    }
+// =====================================
+// USER ROUTES
+// =====================================
 
-    // Create order with validated products
-    const order = new Order({
-      userId: req.userId,
-      items: validatedProducts.map(p => ({
-        productId: p._id, // Store ObjectId in order
-        quantity: p.quantity,
-        size: p.size,
-        price: p.price
-      })),
-      shippingAddress,
-      paymentMethod,
-      totalAmount: validatedProducts.reduce((sum, p) => sum + (p.price * p.quantity), 0)
-    });
+// Create order (authenticated users)
+router.post('/', verifyToken, createOrder);
 
-    await order.save();
+// Get user's orders
+router.get('/my-orders', verifyToken, getUserOrders);
 
-    // Update stock
-    for (const item of validatedProducts) {
-      await Product.findByIdAndUpdate(item._id, {
-        $inc: { stock: -item.quantity }
-      });
-    }
+// Get order by ID
+router.get('/:id', verifyToken, getOrderById);
 
-    res.status(201).json({
-      success: true,
-      message: 'Đặt hàng thành công',
-      order: order
-    });
+// Cancel order
+router.post('/:id/cancel', verifyToken, cancelOrder);
 
-  } catch (error) {
-    console.error('❌ Checkout error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi khi tạo đơn hàng: ' + error.message
-    });
-  }
-});
+// =====================================
+// ADMIN ROUTES
+// =====================================
+
+// Get all orders (admin)
+router.get('/admin/all', verifyAdminToken, getAllOrders);
+
+// Update order status (admin)
+router.patch('/admin/:id/status', verifyAdminToken, updateOrderStatus);
+
+module.exports = router;
