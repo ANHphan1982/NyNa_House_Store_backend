@@ -63,7 +63,7 @@ app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/auth', userRoutes);
 app.use('/api/admin', adminRoutes);
-
+app.use('/api/upload', require('./src/uploads/upload.route'));
 // =========================================
 // 7. ROOT & HEALTH CHECK ROUTES
 // =========================================
