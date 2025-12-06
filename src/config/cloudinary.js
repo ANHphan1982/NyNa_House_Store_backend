@@ -3,10 +3,7 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const multer = require('multer');
 
-/**
- * 🖼️ CLOUDINARY CONFIGURATION
- * Free tier: 25GB storage + 25GB bandwidth/month
- */
+console.log('🔧 Initializing Cloudinary config...');
 
 // Configure Cloudinary
 cloudinary.config({
@@ -15,86 +12,50 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Storage configuration for products
-const productStorage = new CloudinaryStorage({
+console.log('✅ Cloudinary configured:', {
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME ? '✓' : '✗',
+  api_key: process.env.CLOUDINARY_API_KEY ? '✓' : '✗',
+  api_secret: process.env.CLOUDINARY_API_SECRET ? '✓' : '✗'
+});
+
+// Configure Multer Storage
+const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: 'nyna-house-store/products', // Organize by folder
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],
+    folder: 'nyna-house-products',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
     transformation: [
-      { width: 1000, height: 1000, crop: 'limit' }, // Max 1000x1000
-      { quality: 'auto' }, // Auto quality optimization
-      { fetch_format: 'auto' } // Auto format (WebP if supported)
+      { width: 800, height: 800, crop: 'limit' },
+      { quality: 'auto:good' }
     ]
   }
 });
 
-// Storage for categories/banners
-const categoryStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'nyna-house-store/categories',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-    transformation: [
-      { width: 600, height: 400, crop: 'fill' },
-      { quality: 'auto' }
-    ]
-  }
-});
+console.log('✅ Cloudinary storage configured');
 
-// Multer upload middleware
-const uploadProduct = multer({ 
-  storage: productStorage,
+// Create Multer Upload Instance
+const upload = multer({
+  storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024 // Max 5MB
+    fileSize: 5 * 1024 * 1024 // 5MB
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Chỉ chấp nhận file ảnh (JPG, PNG, GIF, WEBP)'), false);
+    }
   }
 });
 
-const uploadCategory = multer({ 
-  storage: categoryStorage,
-  limits: {
-    fileSize: 3 * 1024 * 1024 // Max 3MB
-  }
-});
+console.log('✅ Multer upload instance created');
 
-/**
- * Helper: Delete image from Cloudinary
- */
-const deleteImage = async (publicId) => {
-  try {
-    const result = await cloudinary.uploader.destroy(publicId);
-    console.log('🗑️ Image deleted:', publicId);
-    return result;
-  } catch (error) {
-    console.error('❌ Error deleting image:', error);
-    throw error;
-  }
-};
-
-/**
- * Helper: Get optimized URL
- */
-const getOptimizedUrl = (publicId, options = {}) => {
-  const {
-    width = 800,
-    height = 800,
-    crop = 'limit',
-    quality = 'auto',
-    format = 'auto'
-  } = options;
-
-  return cloudinary.url(publicId, {
-    transformation: [
-      { width, height, crop },
-      { quality, fetch_format: format }
-    ]
-  });
-};
-
+// 🔥 CRITICAL: Export both cloudinary and upload
 module.exports = {
   cloudinary,
-  uploadProduct,
-  uploadCategory,
-  deleteImage,
-  getOptimizedUrl
+  upload
 };
+
+console.log('✅ Cloudinary module exported successfully');

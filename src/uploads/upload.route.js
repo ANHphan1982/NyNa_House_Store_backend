@@ -1,13 +1,49 @@
 // backend/src/uploads/upload.route.js
 const express = require('express');
 const router = express.Router();
-const { upload } = require('../config/cloudinary');
+
+// 🔥 TRY-CATCH import để debug
+let upload, cloudinary;
+
+try {
+  const cloudinaryModule = require('../config/cloudinary');
+  upload = cloudinaryModule.upload;
+  cloudinary = cloudinaryModule.cloudinary;
+  
+  if (!upload) {
+    throw new Error('Upload instance is undefined');
+  }
+  if (!cloudinary) {
+    throw new Error('Cloudinary instance is undefined');
+  }
+  
+  console.log('✅ Cloudinary module loaded successfully');
+} catch (error) {
+  console.error('❌ Failed to load cloudinary module:', error);
+  console.error('Make sure:');
+  console.error('1. File src/config/cloudinary.js exists');
+  console.error('2. Dependencies installed: npm install cloudinary multer multer-storage-cloudinary');
+  console.error('3. Environment variables set: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET');
+  throw error;
+}
+
 const { verifyAdminToken } = require('../middleware/verifyAdminToken');
 
 console.log('✅ Upload routes loaded');
 
 // UPLOAD SINGLE IMAGE
-router.post('/image', verifyAdminToken, upload.single('image'), (req, res) => {
+router.post('/image', verifyAdminToken, (req, res, next) => {
+  // Check if upload middleware is available
+  if (!upload) {
+    return res.status(500).json({
+      success: false,
+      message: 'Upload service is not configured properly'
+    });
+  }
+  
+  // Use upload middleware
+  upload.single('image')(req, res, next);
+}, (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -35,7 +71,16 @@ router.post('/image', verifyAdminToken, upload.single('image'), (req, res) => {
 });
 
 // UPLOAD MULTIPLE IMAGES
-router.post('/images', verifyAdminToken, upload.array('images', 5), (req, res) => {
+router.post('/images', verifyAdminToken, (req, res, next) => {
+  if (!upload) {
+    return res.status(500).json({
+      success: false,
+      message: 'Upload service is not configured properly'
+    });
+  }
+  
+  upload.array('images', 5)(req, res, next);
+}, (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({
@@ -69,10 +114,16 @@ router.post('/images', verifyAdminToken, upload.array('images', 5), (req, res) =
 // DELETE IMAGE FROM CLOUDINARY
 router.delete('/image/:publicId', verifyAdminToken, async (req, res) => {
   try {
+    if (!cloudinary) {
+      return res.status(500).json({
+        success: false,
+        message: 'Cloudinary service is not configured properly'
+      });
+    }
+
     const { publicId } = req.params;
     const decodedPublicId = decodeURIComponent(publicId);
 
-    const { cloudinary } = require('../config/cloudinary');
     const result = await cloudinary.uploader.destroy(decodedPublicId);
 
     if (result.result === 'ok') {
