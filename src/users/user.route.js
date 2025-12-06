@@ -21,7 +21,10 @@ const {
   validatePhone,
   validatePassword,
   validateLoginData,
-  validateRegistrationData
+  validateRegistrationData,
+  sanitizeName,      // 🔥 ADD THIS
+  sanitizeEmail,     // 🔥 ADD THIS
+  sanitizePhone      // 🔥 ADD THIS
 } = require('../utils/validation');
 
 console.log('✅ User routes loaded with 2FA OTP system');
