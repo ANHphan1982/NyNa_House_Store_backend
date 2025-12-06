@@ -331,6 +331,11 @@ const updateOrderStatus = async (req, res) => {
       });
     }
 
+    // 🔥 CHECK: If changing to cancelled, restore stock
+    const oldStatus = order.status;
+    const isBeingCancelled = status === 'cancelled' && oldStatus !== 'cancelled';
+
+    // Update status
     order.status = status;
 
     // Set timestamp based on status
@@ -342,6 +347,40 @@ const updateOrderStatus = async (req, res) => {
     await order.save();
 
     console.log(`✅ Order status updated: ${order._id} → ${status}`);
+
+    // 🔥 RESTORE STOCK if order is being cancelled
+    if (isBeingCancelled) {
+      console.log('🔄 Restoring stock for cancelled order...');
+      
+      const Product = require('../products/product.model');
+      const mongoose = require('mongoose');
+
+      for (const item of order.items) {
+        let product;
+        
+        // Try to find product by ObjectId first
+        if (mongoose.Types.ObjectId.isValid(item.productId)) {
+          product = await Product.findById(item.productId);
+        }
+        
+        // If not found, try by productId (Number)
+        if (!product && typeof item.productId === 'number') {
+          product = await Product.findOne({ productId: item.productId });
+        }
+
+        if (product) {
+          const oldStock = product.stock;
+          product.stock += item.quantity;
+          await product.save();
+          
+          console.log(`📈 Stock restored: ${product.name} (${oldStock} → ${product.stock}) +${item.quantity}`);
+        } else {
+          console.warn(`⚠️ Product not found for stock restore:`, item.productId);
+        }
+      }
+
+      console.log('✅ Stock restoration completed');
+    }
 
     res.json({
       success: true,
