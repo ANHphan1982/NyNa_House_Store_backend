@@ -14,7 +14,10 @@ const { sendPasswordResetEmail } = require('./passwordReset');
 const { authLimiter } = require('../config/security');
 const emailLimiter = authLimiter; // Dùng tạm authLimiter thay emailLimiter
 
-
+// 🔥 COOKIE HELPER FUNCTIONS
+const cookieHelper = require('../utils/cookieHelper');
+const getCookieOptions = cookieHelper.getCookieOptions;
+const clearCookieOptions = cookieHelper.clearCookieOptions;
 // 🔒 IMPORT VALIDATION
 // 🔒 IMPORT VALIDATION
 const {
