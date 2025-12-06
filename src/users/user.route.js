@@ -1155,5 +1155,199 @@ if (process.env.NODE_ENV !== 'production') {
     res.json({ success: true, otps });
   });
 }
+// 🔥 NEW ROUTE: REQUEST PASSWORD RESET
+router.post('/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    console.log('🔑 Password reset request for:', email);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email là bắt buộc'
+      });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Find user by email
+    const user = await User.findOne({ email: cleanEmail });
+
+    // 🔒 SECURITY: Always return success (don't reveal if email exists)
+    if (!user) {
+      console.log('⚠️ Email not found, but returning success for security');
+      return res.json({
+        success: true,
+        message: 'Nếu email tồn tại, chúng tôi đã gửi link đặt lại mật khẩu.'
+      });
+    }
+
+    // Check if user registered with phone (no email)
+    if (user.registerType === 'phone' && !user.email) {
+      console.log('⚠️ User registered with phone, cannot reset password via email');
+      return res.status(400).json({
+        success: false,
+        message: 'Tài khoản này không được đăng ký bằng email. Vui lòng liên hệ support.'
+      });
+    }
+
+    // Generate reset token
+    const crypto = require('crypto');
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    
+    // Hash token before storing
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(resetToken)
+      .digest('hex');
+    
+    // Save to user
+    user.passwordResetToken = hashedToken;
+    user.passwordResetExpiry = Date.now() + 60 * 60 * 1000; // 1 hour
+    await user.save();
+
+    // Send email
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
+    
+    try {
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: user.email,
+        subject: 'Đặt lại mật khẩu - NyNA House Store',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #2563eb;">Đặt lại mật khẩu</h2>
+            <p>Xin chào <strong>${user.name}</strong>,</p>
+            <p>Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn.</p>
+            <p>Vui lòng click vào nút bên dưới để đặt lại mật khẩu:</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${resetUrl}" 
+                 style="background: #dc2626; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                Đặt Lại Mật Khẩu
+              </a>
+            </div>
+            
+            <p style="color: #6b7280; font-size: 14px;">Hoặc copy link sau vào trình duyệt:</p>
+            <p style="background: #f3f4f6; padding: 10px; word-break: break-all; font-size: 12px;">
+              ${resetUrl}
+            </p>
+            
+            <p style="color: #dc2626; font-size: 14px;">⏰ Link này sẽ hết hạn sau 1 giờ.</p>
+            
+            <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 15px; margin: 20px 0;">
+              <p style="color: #991b1b; margin: 0; font-weight: bold;">⚠️ Lưu ý bảo mật:</p>
+              <ul style="color: #991b1b; margin: 10px 0;">
+                <li>Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này</li>
+                <li>Không chia sẻ link này với bất kỳ ai</li>
+              </ul>
+            </div>
+            
+            <hr style="margin: 20px 0; border: none; border-top: 1px solid #e5e7eb;">
+            <p style="color: #6b7280; font-size: 12px;">📧 Email này được gửi tự động, vui lòng không trả lời.</p>
+          </div>
+        `
+      });
+      
+      console.log('✅ Password reset email sent');
+    } catch (emailError) {
+      console.error('❌ Failed to send email:', emailError);
+      
+      // Clear token if email fails
+      user.passwordResetToken = undefined;
+      user.passwordResetExpiry = undefined;
+      await user.save();
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Không thể gửi email. Vui lòng thử lại sau.'
+      });
+    }
+
+    console.log('✅ Password reset request successful');
+
+    res.json({
+      success: true,
+      message: 'Chúng tôi đã gửi link đặt lại mật khẩu đến email của bạn. Vui lòng check hộp thư.'
+    });
+
+  } catch (error) {
+    console.error('❌ Forgot password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
+    });
+  }
+});
+
+// 🔥 NEW ROUTE: RESET PASSWORD
+router.post('/reset-password', authLimiter, async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    
+    console.log('🔑 Password reset attempt');
+
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token và mật khẩu mới là bắt buộc'
+      });
+    }
+
+    // Validate new password
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: passwordValidation.message
+      });
+    }
+
+    // Hash the token to match stored token
+    const crypto = require('crypto');
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // Find user with this token
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpiry: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      console.log('❌ Invalid or expired reset token');
+      return res.status(400).json({
+        success: false,
+        message: 'Token không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu đặt lại mật khẩu mới.'
+      });
+    }
+
+    // Set new password
+    user.password = newPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpiry = undefined;
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
+    
+    await user.save();
+
+    console.log('✅ Password reset successful for user:', user.email);
+
+    res.json({
+      success: true,
+      message: 'Đặt lại mật khẩu thành công! Bạn có thể đăng nhập với mật khẩu mới.'
+    });
+
+  } catch (error) {
+    console.error('❌ Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
+    });
+  }
+});
 
 module.exports = router;
