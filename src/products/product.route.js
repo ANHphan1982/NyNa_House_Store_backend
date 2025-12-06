@@ -251,8 +251,8 @@ router.post('/', verifyAdminToken, async (req, res) => {
   }
 });
 
-// 🔥 UPDATE PRODUCT
-router.patch('/:id', verifyAdminToken, async (req, res) => {
+// 🔥 UPDATE PRODUCT - Support both PATCH and PUT
+const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
@@ -260,6 +260,9 @@ router.patch('/:id', verifyAdminToken, async (req, res) => {
     console.log('📝 Updating product:', id);
 
     // Find product by _id or productId
+    const mongoose = require('mongoose');
+    const Product = require('./product.model');
+    
     let product;
     if (mongoose.Types.ObjectId.isValid(id) && id.length === 24) {
       product = await Product.findById(id);
@@ -298,7 +301,11 @@ router.patch('/:id', verifyAdminToken, async (req, res) => {
       message: 'Lỗi khi cập nhật sản phẩm'
     });
   }
-});
+};
+
+// Register both PATCH and PUT
+router.patch('/:id', verifyAdminToken, updateProduct);
+router.put('/:id', verifyAdminToken, updateProduct);
 
 // 🔥 DELETE PRODUCT (Soft delete)
 router.delete('/:id', verifyAdminToken, async (req, res) => {
