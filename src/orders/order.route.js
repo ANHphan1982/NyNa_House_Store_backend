@@ -46,6 +46,7 @@ router.get('/user', verifyToken, getUserOrders);
 
 // Cancel order (User or Admin)
 router.post('/:id/cancel', verifyTokenOrAdmin, cancelOrder);
+router.patch('/:id/cancel', verifyTokenOrAdmin, cancelOrder); // 🔥 ADD THIS LINE
 
 // =====================================
 // GENERIC ROUTES (LAST!)
