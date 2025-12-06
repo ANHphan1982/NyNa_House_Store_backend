@@ -15,9 +15,15 @@ const port = process.env.PORT || 5000;
 // =========================================
 // 1. TRUST PROXY (MUST BE FIRST!)
 // =========================================
-setupTrustProxy(app); // 🔥 Add this BEFORE setupSecurity
-
 // =========================================
+// 🔥 FIX: Add trust proxy directly here
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+  console.log('✅ Trust proxy enabled (production)');
+} else {
+  app.set('trust proxy', true);
+  console.log('✅ Trust proxy enabled (development)');
+}
 // 2. SECURITY MIDDLEWARE
 // =========================================
 console.log('🔒 Initializing security...');
