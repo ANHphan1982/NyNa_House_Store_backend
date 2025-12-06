@@ -101,7 +101,58 @@ if (typeof getProductById !== 'function') {
   console.error('   Value:', getProductById);
 }
 
-router.get('/:id', generalLimiter, getProductById);
+// 🔥 FIX: GET SINGLE PRODUCT - Accept both ObjectId and productId
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    let product;
+
+    console.log('🔍 Looking for product:', id);
+
+    // 🔥 TRY 1: Check if it's a valid ObjectId (24 hex chars)
+    if (mongoose.Types.ObjectId.isValid(id) && id.length === 24) {
+      console.log('   → Querying by _id (ObjectId)');
+      product = await Product.findOne({ _id: id, isActive: true });
+    } 
+    
+    // 🔥 TRY 2: If not found, try productId (Number)
+    if (!product && !isNaN(id)) {
+      console.log('   → Querying by productId (Number)');
+      product = await Product.findOne({ productId: Number(id), isActive: true });
+    }
+
+    // 🔥 TRY 3: If still not found, try by name
+    if (!product) {
+      console.log('   → Querying by name');
+      product = await Product.findOne({ 
+        name: { $regex: new RegExp(id, 'i') },
+        isActive: true 
+      });
+    }
+
+    if (!product) {
+      console.log('❌ Product not found:', id);
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy sản phẩm'
+      });
+    }
+
+    console.log('✅ Found product:', product.name);
+
+    res.json({
+      success: true,
+      product
+    });
+
+  } catch (error) {
+    console.error('❌ Get product error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy thông tin sản phẩm'
+    });
+  }
+});
 console.log('✅ [DEBUG] Route 6 OK');
 
 console.log('✅ [DEBUG] All routes configured successfully');
