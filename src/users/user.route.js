@@ -14,6 +14,7 @@ const { sendPasswordResetEmail } = require('./passwordReset');
 const { authLimiter } = require('../config/security');
 const emailLimiter = authLimiter; // Dùng tạm authLimiter thay emailLimiter
 
+
 // 🔒 IMPORT VALIDATION
 // 🔒 IMPORT VALIDATION
 const {
@@ -22,9 +23,10 @@ const {
   validatePassword,
   validateLoginData,
   validateRegistrationData,
-  sanitizeName,      // 🔥 ADD THIS
-  sanitizeEmail,     // 🔥 ADD THIS
-  sanitizePhone      // 🔥 ADD THIS
+  sanitizeString,
+  sanitizeName,
+  sanitizeEmail,
+  sanitizePhone
 } = require('../utils/validation');
 
 console.log('✅ User routes loaded with 2FA OTP system');

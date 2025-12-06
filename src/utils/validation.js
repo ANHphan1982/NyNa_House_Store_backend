@@ -1,99 +1,139 @@
-// backend/src/utils/validation.js
-const validator = require('validator');
+// backend/src/config/validation.js
 
 /**
- * 🛡️ INPUT VALIDATION & SANITIZATION UTILITIES
- * Comprehensive validation functions for user inputs
+ * 🔒 INPUT VALIDATION & SANITIZATION
+ * Comprehensive validation and sanitization functions for user inputs
  */
 
-// ✅ SANITIZE STRING INPUT
-const sanitizeString = (input, maxLength = 1000) => {
-  if (!input || typeof input !== 'string') {
-    return '';
-  }
+// =====================================
+// SANITIZATION FUNCTIONS
+// =====================================
 
-  return input
+/**
+ * Sanitize general string (remove dangerous characters)
+ * @param {string} str - Input string to sanitize
+ * @returns {string} Sanitized string
+ */
+const sanitizeString = (str) => {
+  if (typeof str !== 'string') return '';
+  return str
     .trim()
-    .replace(/[<>]/g, '') // Remove < and >
-    .replace(/\$/g, '') // Remove $
-    .replace(/\./g, '') // Remove . (for NoSQL injection)
-    .slice(0, maxLength); // Limit length
+    .replace(/[<>]/g, '')           // Remove < >
+    .replace(/javascript:/gi, '')   // Remove javascript:
+    .replace(/on\w+=/gi, '')        // Remove onX= event handlers
+    .replace(/[\x00-\x1F\x7F]/g, ''); // Remove control characters
 };
 
-// ✅ SANITIZE HTML INPUT (allow some tags)
-const sanitizeHTML = (input) => {
-  if (!input || typeof input !== 'string') {
-    return '';
-  }
+/**
+ * Sanitize name (allow letters, spaces, hyphens, apostrophes)
+ * Supports Vietnamese characters
+ * @param {string} name - Name to sanitize
+ * @returns {string} Sanitized name
+ */
+const sanitizeName = (name) => {
+  if (typeof name !== 'string') return '';
+  return name
+    .trim()
+    .replace(/[^a-zA-ZÀ-ỹ\s'-]/g, '') // Allow Vietnamese, spaces, hyphens, apostrophes
+    .replace(/\s+/g, ' ')              // Replace multiple spaces with single space
+    .substring(0, 100);                // Max length 100 chars
+};
 
-  // Remove script tags and dangerous attributes
-  return input
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '') // Remove event handlers
+/**
+ * Sanitize email (convert to lowercase, remove whitespace)
+ * @param {string} email - Email to sanitize
+ * @returns {string} Sanitized email
+ */
+const sanitizeEmail = (email) => {
+  if (typeof email !== 'string') return '';
+  return email
+    .trim()
+    .toLowerCase()
+    .replace(/[<>]/g, '')
+    .replace(/\s/g, ''); // Remove all whitespace
+};
+
+/**
+ * Sanitize phone (remove non-digits except +)
+ * @param {string} phone - Phone number to sanitize
+ * @returns {string} Sanitized phone
+ */
+const sanitizePhone = (phone) => {
+  if (typeof phone !== 'string') return '';
+  return phone
+    .trim()
+    .replace(/[^\d+]/g, ''); // Keep only digits and +
+};
+
+/**
+ * Sanitize address (remove dangerous characters but keep Vietnamese)
+ * @param {string} address - Address to sanitize
+ * @returns {string} Sanitized address
+ */
+const sanitizeAddress = (address) => {
+  if (typeof address !== 'string') return '';
+  return address
+    .trim()
+    .replace(/[<>]/g, '')
     .replace(/javascript:/gi, '')
-    .trim();
+    .substring(0, 500); // Max 500 chars
 };
 
-// ✅ VALIDATE PASSWORD
+// =====================================
+// VALIDATION FUNCTIONS
+// =====================================
+
+/**
+ * Validate password strength
+ * Requirements:
+ * - At least 8 characters
+ * - At least 1 uppercase letter
+ * - At least 1 lowercase letter
+ * - At least 1 number
+ * - At least 1 special character
+ * @param {string} password - Password to validate
+ * @returns {Object} {isValid: boolean, message: string}
+ */
 const validatePassword = (password) => {
   if (!password || typeof password !== 'string') {
     return {
       isValid: false,
-      message: 'Mật khẩu không được để trống'
+      message: 'Mật khẩu là bắt buộc'
     };
   }
 
-  const minLength = 8;
-  const hasUpperCase = /[A-Z]/.test(password);
-  const hasLowerCase = /[a-z]/.test(password);
-  const hasNumbers = /\d/.test(password);
-  const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
-
-  if (password.length < minLength) {
+  if (password.length < 8) {
     return {
       isValid: false,
-      message: `Mật khẩu phải có ít nhất ${minLength} ký tự`
+      message: 'Mật khẩu phải có ít nhất 8 ký tự'
     };
   }
 
-  if (!hasUpperCase) {
+  if (!/[A-Z]/.test(password)) {
     return {
       isValid: false,
       message: 'Mật khẩu phải có ít nhất 1 chữ hoa'
     };
   }
 
-  if (!hasLowerCase) {
+  if (!/[a-z]/.test(password)) {
     return {
       isValid: false,
       message: 'Mật khẩu phải có ít nhất 1 chữ thường'
     };
   }
 
-  if (!hasNumbers) {
+  if (!/[0-9]/.test(password)) {
     return {
       isValid: false,
       message: 'Mật khẩu phải có ít nhất 1 số'
     };
   }
 
-  if (!hasSpecialChar) {
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
     return {
       isValid: false,
-      message: 'Mật khẩu phải có ít nhất 1 ký tự đặc biệt (!@#$%^&*...)'
-    };
-  }
-
-  // Check for common passwords
-  const commonPasswords = [
-    'password', '12345678', 'qwerty123', 'abc12345', 
-    'password123', 'admin123', 'letmein123', '123456789'
-  ];
-  
-  if (commonPasswords.includes(password.toLowerCase())) {
-    return {
-      isValid: false,
-      message: 'Mật khẩu này quá phổ biến, vui lòng chọn mật khẩu khác'
+      message: 'Mật khẩu phải có ít nhất 1 ký tự đặc biệt'
     };
   }
 
@@ -103,477 +143,186 @@ const validatePassword = (password) => {
   };
 };
 
-// ✅ VALIDATE EMAIL
+/**
+ * Validate email format
+ * @param {string} email - Email to validate
+ * @returns {boolean} True if valid
+ */
 const validateEmail = (email) => {
-  if (!email || typeof email !== 'string') {
-    return {
-      isValid: false,
-      message: 'Email không được để trống'
-    };
-  }
-
-  const sanitizedEmail = email.trim().toLowerCase();
-
-  if (!validator.isEmail(sanitizedEmail)) {
-    return {
-      isValid: false,
-      message: 'Email không hợp lệ'
-    };
-  }
-
-  // Check for disposable email domains
-  const disposableDomains = [
-    'tempmail.com', '10minutemail.com', 'guerrillamail.com',
-    'mailinator.com', 'throwaway.email'
-  ];
-
-  const domain = sanitizedEmail.split('@')[1];
-  if (disposableDomains.includes(domain)) {
-    return {
-      isValid: false,
-      message: 'Vui lòng sử dụng email thường xuyên, không phải email tạm'
-    };
-  }
-
-  return {
-    isValid: true,
-    email: sanitizedEmail,
-    message: 'Email hợp lệ'
-  };
+  if (!email || typeof email !== 'string') return false;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email.trim());
 };
 
-// ✅ VALIDATE PHONE NUMBER (Vietnam)
+/**
+ * Validate phone format (Vietnamese)
+ * Accepts: 10 digits starting with 0, or +84 followed by 9 digits
+ * @param {string} phone - Phone number to validate
+ * @returns {boolean} True if valid
+ */
 const validatePhone = (phone) => {
-  if (!phone || typeof phone !== 'string') {
-    return {
-      isValid: false,
-      message: 'Số điện thoại không được để trống'
-    };
-  }
-
-  const sanitizedPhone = phone.trim().replace(/\s+/g, '');
-
-  // Vietnam phone number format: 0[3|5|7|8|9] + 8 digits
-  const phoneRegex = /^(0[3|5|7|8|9])+([0-9]{8})$/;
-
-  if (!phoneRegex.test(sanitizedPhone)) {
-    return {
-      isValid: false,
-      message: 'Số điện thoại không hợp lệ. Định dạng: 0xxxxxxxxx (10 số)'
-    };
-  }
-
-  return {
-    isValid: true,
-    phone: sanitizedPhone,
-    message: 'Số điện thoại hợp lệ'
-  };
-};
-
-// ✅ VALIDATE NAME
-const validateName = (name) => {
-  if (!name || typeof name !== 'string') {
-    return {
-      isValid: false,
-      message: 'Họ tên không được để trống'
-    };
-  }
-
-  const sanitizedName = sanitizeString(name, 100);
-
-  if (sanitizedName.length < 2) {
-    return {
-      isValid: false,
-      message: 'Họ tên phải có ít nhất 2 ký tự'
-    };
-  }
-
-  if (sanitizedName.length > 100) {
-    return {
-      isValid: false,
-      message: 'Họ tên không được quá 100 ký tự'
-    };
-  }
-
-  // Check for numbers in name
-  if (/\d/.test(sanitizedName)) {
-    return {
-      isValid: false,
-      message: 'Họ tên không được chứa số'
-    };
-  }
-
-  // Check for special characters (allow Vietnamese characters)
-  const nameRegex = /^[a-zA-ZÀ-ỹ\s]+$/;
-  if (!nameRegex.test(sanitizedName)) {
-    return {
-      isValid: false,
-      message: 'Họ tên chỉ được chứa chữ cái và khoảng trắng'
-    };
-  }
-
-  return {
-    isValid: true,
-    name: sanitizedName,
-    message: 'Họ tên hợp lệ'
-  };
-};
-
-// ✅ VALIDATE ADDRESS
-const validateAddress = (address) => {
-  if (!address || typeof address !== 'string') {
-    return {
-      isValid: false,
-      message: 'Địa chỉ không được để trống'
-    };
-  }
-
-  const sanitizedAddress = sanitizeString(address, 500);
-
-  if (sanitizedAddress.length < 10) {
-    return {
-      isValid: false,
-      message: 'Địa chỉ quá ngắn, vui lòng nhập chi tiết hơn'
-    };
-  }
-
-  if (sanitizedAddress.length > 500) {
-    return {
-      isValid: false,
-      message: 'Địa chỉ không được quá 500 ký tự'
-    };
-  }
-
-  return {
-    isValid: true,
-    address: sanitizedAddress,
-    message: 'Địa chỉ hợp lệ'
-  };
-};
-
-// ✅ VALIDATE PRICE
-const validatePrice = (price) => {
-  const numPrice = Number(price);
-
-  if (isNaN(numPrice)) {
-    return {
-      isValid: false,
-      message: 'Giá không hợp lệ'
-    };
-  }
-
-  if (numPrice < 0) {
-    return {
-      isValid: false,
-      message: 'Giá không được âm'
-    };
-  }
-
-  if (numPrice > 1000000000) { // 1 billion VND
-    return {
-      isValid: false,
-      message: 'Giá quá cao'
-    };
-  }
-
-  return {
-    isValid: true,
-    price: numPrice,
-    message: 'Giá hợp lệ'
-  };
-};
-
-// ✅ VALIDATE QUANTITY
-const validateQuantity = (quantity) => {
-  const numQty = Number(quantity);
-
-  if (isNaN(numQty) || !Number.isInteger(numQty)) {
-    return {
-      isValid: false,
-      message: 'Số lượng phải là số nguyên'
-    };
-  }
-
-  if (numQty < 1) {
-    return {
-      isValid: false,
-      message: 'Số lượng phải lớn hơn 0'
-    };
-  }
-
-  if (numQty > 1000) {
-    return {
-      isValid: false,
-      message: 'Số lượng không được vượt quá 1000'
-    };
-  }
-
-  return {
-    isValid: true,
-    quantity: numQty,
-    message: 'Số lượng hợp lệ'
-  };
-};
-
-// ✅ VALIDATE PRODUCT ID
-const validateProductId = (productId) => {
-  if (!productId) {
-    return {
-      isValid: false,
-      message: 'Product ID không được để trống'
-    };
-  }
-
-  // Accept both MongoDB ObjectId and Number ID
-  const isObjectId = /^[0-9a-fA-F]{24}$/.test(String(productId));
-  const isNumericId = !isNaN(Number(productId));
-
-  if (!isObjectId && !isNumericId) {
-    return {
-      isValid: false,
-      message: 'Product ID không hợp lệ'
-    };
-  }
-
-  return {
-    isValid: true,
-    productId: productId,
-    message: 'Product ID hợp lệ'
-  };
-};
-
-// 🔥 VALIDATE NUMBER - FUNCTION MỚI
-const validateNumber = (value, options = {}) => {
-  const {
-    min = -Infinity,
-    max = Infinity,
-    integer = false,
-    allowDecimal = true
-  } = options;
-
-  // Convert to number
-  const num = Number(value);
+  if (!phone || typeof phone !== 'string') return false;
+  const cleanPhone = phone.trim();
   
-  // Check if valid number
-  if (isNaN(num)) {
-    return { 
-      isValid: false, 
-      message: 'Giá trị phải là số' 
-    };
-  }
+  // Vietnamese phone: 10 digits, starts with 0
+  const phoneRegex1 = /^0\d{9}$/;
   
-  // Check if integer required
-  if (integer && !Number.isInteger(num)) {
-    return { 
-      isValid: false, 
-      message: 'Giá trị phải là số nguyên' 
-    };
-  }
+  // International format: +84 followed by 9 digits
+  const phoneRegex2 = /^\+84\d{9}$/;
   
-  // Check min value
-  if (num < min) {
-    return { 
-      isValid: false, 
-      message: `Giá trị phải lớn hơn hoặc bằng ${min}` 
-    };
-  }
-  
-  // Check max value
-  if (num > max) {
-    return { 
-      isValid: false, 
-      message: `Giá trị phải nhỏ hơn hoặc bằng ${max}` 
-    };
-  }
-  
-  return { 
-    isValid: true, 
-    value: num,
-    message: 'Giá trị hợp lệ'
-  };
+  return phoneRegex1.test(cleanPhone) || phoneRegex2.test(cleanPhone);
 };
 
-// ✅ SANITIZE OBJECT (recursively)
-const sanitizeObject = (obj, maxDepth = 5, currentDepth = 0) => {
-  if (currentDepth >= maxDepth) {
-    return obj;
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map(item => sanitizeObject(item, maxDepth, currentDepth + 1));
-  }
-
-  if (obj !== null && typeof obj === 'object') {
-    const sanitized = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        // Skip if key starts with $ or contains .
-        if (key.startsWith('$') || key.includes('.')) {
-          console.warn(`⚠️ Skipping potentially dangerous key: ${key}`);
-          continue;
-        }
-        
-        const value = obj[key];
-        if (typeof value === 'string') {
-          sanitized[key] = sanitizeString(value);
-        } else {
-          sanitized[key] = sanitizeObject(value, maxDepth, currentDepth + 1);
-        }
-      }
-    }
-    return sanitized;
-  }
-
-  return obj;
-};
-
-// ✅ VALIDATE ORDER DATA
-const validateOrderData = (orderData) => {
+/**
+ * Validate registration data
+ * @param {Object} data - Registration data {name, email, phone, password}
+ * @returns {Object} {isValid: boolean, errors: string[]}
+ */
+const validateRegistrationData = (data) => {
   const errors = [];
 
-  // Validate products
-  if (!orderData.products || !Array.isArray(orderData.products) || orderData.products.length === 0) {
-    errors.push('Đơn hàng phải có ít nhất 1 sản phẩm');
-  } else {
-    orderData.products.forEach((item, index) => {
-      const prodIdResult = validateProductId(item.productId);
-      if (!prodIdResult.isValid) {
-        errors.push(`Sản phẩm ${index + 1}: ${prodIdResult.message}`);
-      }
-
-      const qtyResult = validateQuantity(item.quantity);
-      if (!qtyResult.isValid) {
-        errors.push(`Sản phẩm ${index + 1}: ${qtyResult.message}`);
-      }
-
-      const priceResult = validatePrice(item.price);
-      if (!priceResult.isValid) {
-        errors.push(`Sản phẩm ${index + 1}: ${priceResult.message}`);
-      }
-    });
+  // Name validation
+  if (!data.name || typeof data.name !== 'string' || data.name.trim().length < 2) {
+    errors.push('Tên phải có ít nhất 2 ký tự');
   }
 
-  // Validate shipping address
-  if (!orderData.shippingAddress) {
-    errors.push('Thiếu thông tin địa chỉ giao hàng');
-  } else {
-    const nameResult = validateName(orderData.shippingAddress.fullName);
-    if (!nameResult.isValid) {
-      errors.push(`Địa chỉ giao hàng: ${nameResult.message}`);
-    }
+  // Email or Phone required
+  if (!data.email && !data.phone) {
+    errors.push('Email hoặc số điện thoại là bắt buộc');
+  }
 
-    const phoneResult = validatePhone(orderData.shippingAddress.phone);
-    if (!phoneResult.isValid) {
-      errors.push(`Địa chỉ giao hàng: ${phoneResult.message}`);
-    }
+  // Email format if provided
+  if (data.email && !validateEmail(data.email)) {
+    errors.push('Email không hợp lệ');
+  }
 
-    const addressResult = validateAddress(orderData.shippingAddress.address);
-    if (!addressResult.isValid) {
-      errors.push(`Địa chỉ giao hàng: ${addressResult.message}`);
-    }
+  // Phone format if provided
+  if (data.phone && !validatePhone(data.phone)) {
+    errors.push('Số điện thoại không hợp lệ (10 số, bắt đầu bằng 0 hoặc +84)');
+  }
+
+  // Password validation
+  const passwordValidation = validatePassword(data.password);
+  if (!passwordValidation.isValid) {
+    errors.push(passwordValidation.message);
   }
 
   return {
     isValid: errors.length === 0,
-    errors: errors,
-    message: errors.length === 0 ? 'Dữ liệu đơn hàng hợp lệ' : errors.join('; ')
+    errors
   };
 };
-// ✅ VALIDATE LOGIN DATA
+
+/**
+ * Validate login data
+ * @param {Object} data - Login data {identifier, password}
+ * @returns {Object} {isValid: boolean, errors: string[]}
+ */
 const validateLoginData = (data) => {
-  const errors = {};
-  
-  if (!data.identifier || typeof data.identifier !== 'string') {
-    errors.identifier = 'Vui lòng nhập email hoặc số điện thoại';
-  } else if (data.identifier.trim().length === 0) {
-    errors.identifier = 'Email/Số điện thoại không được để trống';
-  } else if (data.identifier.length > 255) {
-    errors.identifier = 'Email/Số điện thoại quá dài';
+  const errors = [];
+
+  // Identifier required (email or phone)
+  if (!data.identifier || typeof data.identifier !== 'string' || data.identifier.trim().length === 0) {
+    errors.push('Email hoặc số điện thoại là bắt buộc');
   }
-  
-  if (!data.password || typeof data.password !== 'string') {
-    errors.password = 'Vui lòng nhập mật khẩu';
-  } else if (data.password.length < 6) {
-    errors.password = 'Mật khẩu phải có ít nhất 6 ký tự';
+
+  // Password required
+  if (!data.password || typeof data.password !== 'string' || data.password.length === 0) {
+    errors.push('Mật khẩu là bắt buộc');
   }
-  
+
   return {
-    isValid: Object.keys(errors).length === 0,
+    isValid: errors.length === 0,
     errors
   };
 };
 
-// ✅ VALIDATE REGISTRATION DATA
-const validateRegistrationData = (data) => {
-  const errors = {};
-  
-  // Validate name
-  if (!data.name || typeof data.name !== 'string') {
-    errors.name = 'Họ tên là bắt buộc';
-  } else {
-    const trimmedName = data.name.trim();
-    if (trimmedName.length < 2) {
-      errors.name = 'Họ tên phải có ít nhất 2 ký tự';
-    } else if (trimmedName.length > 100) {
-      errors.name = 'Họ tên không được quá 100 ký tự';
-    }
+/**
+ * Validate product data
+ * @param {Object} data - Product data {name, price, stock, etc}
+ * @returns {Object} {isValid: boolean, errors: string[]}
+ */
+const validateProductData = (data) => {
+  const errors = [];
+
+  // Name required
+  if (!data.name || typeof data.name !== 'string' || data.name.trim().length < 2) {
+    errors.push('Tên sản phẩm phải có ít nhất 2 ký tự');
   }
-  
-  // Must have either email OR phone
-  if (!data.email && !data.phone) {
-    errors.contact = 'Vui lòng nhập email hoặc số điện thoại';
+
+  // Price required and must be positive
+  if (!data.price || isNaN(data.price) || Number(data.price) <= 0) {
+    errors.push('Giá sản phẩm phải lớn hơn 0');
   }
-  
-  // Validate email if provided
-  if (data.email) {
-    const emailResult = validateEmail(data.email);
-    if (!emailResult.isValid) {
-      errors.email = emailResult.message;
-    }
+
+  // Stock must be non-negative if provided
+  if (data.stock !== undefined && (isNaN(data.stock) || Number(data.stock) < 0)) {
+    errors.push('Số lượng tồn kho không được âm');
   }
-  
-  // Validate phone if provided
-  if (data.phone) {
-    const phoneResult = validatePhone(data.phone);
-    if (!phoneResult.isValid) {
-      errors.phone = phoneResult.message;
-    }
-  }
-  
-  // Validate password
-  if (!data.password) {
-    errors.password = 'Mật khẩu là bắt buộc';
-  } else {
-    const passwordResult = validatePassword(data.password);
-    if (!passwordResult.isValid) {
-      errors.password = passwordResult.message;
-    }
-  }
-  
+
   return {
-    isValid: Object.keys(errors).length === 0,
+    isValid: errors.length === 0,
     errors
   };
 };
 
-// 🔥 EXPORTS - THÊM validateNumber
+/**
+ * Validate order data
+ * @param {Object} data - Order data {products, shippingAddress, etc}
+ * @returns {Object} {isValid: boolean, errors: string[]}
+ */
+const validateOrderData = (data) => {
+  const errors = [];
+
+  // Products required
+  if (!data.products || !Array.isArray(data.products) || data.products.length === 0) {
+    errors.push('Đơn hàng phải có ít nhất 1 sản phẩm');
+  }
+
+  // Shipping address required
+  if (!data.shippingAddress || typeof data.shippingAddress !== 'object') {
+    errors.push('Địa chỉ giao hàng là bắt buộc');
+  } else {
+    if (!data.shippingAddress.fullName || data.shippingAddress.fullName.trim().length < 2) {
+      errors.push('Họ tên người nhận phải có ít nhất 2 ký tự');
+    }
+    if (!data.shippingAddress.phone || !validatePhone(data.shippingAddress.phone)) {
+      errors.push('Số điện thoại người nhận không hợp lệ');
+    }
+    if (!data.shippingAddress.address || data.shippingAddress.address.trim().length < 5) {
+      errors.push('Địa chỉ giao hàng phải có ít nhất 5 ký tự');
+    }
+  }
+
+  // Payment method required
+  if (!data.paymentMethod) {
+    errors.push('Phương thức thanh toán là bắt buộc');
+  }
+
+  return {
+    isValid: errors.length === 0,
+    errors
+  };
+};
+
+// =====================================
+// EXPORTS
+// =====================================
+
 module.exports = {
+  // Sanitization functions
   sanitizeString,
-  sanitizeHTML,
-  sanitizeObject,
+  sanitizeName,
+  sanitizeEmail,
+  sanitizePhone,
+  sanitizeAddress,
+  
+  // Validation functions
   validatePassword,
   validateEmail,
   validatePhone,
-  validateName,
-  validateAddress,
-  validatePrice,
-  validateQuantity,
-  validateProductId,
-  validateNumber,      // 🔥 THÊM DÒNG NÀY
-  validateOrderData,
-  validateLoginData,         // 🔥 THÊM DÒNG NÀY
-  validateRegistrationData,  // 🔥 THÊM DÒNG NÀY
+  validateRegistrationData,
+  validateLoginData,
+  validateProductData,
   validateOrderData
-  
-  
 };
