@@ -1,107 +1,81 @@
 // backend/src/products/product.route.js
 const express = require('express');
 const router = express.Router();
-
-console.log('🔍 [DEBUG] Starting product.route.js');
-
-// 🔥 DEBUG: Import controllers
-console.log('🔍 [DEBUG] Importing product.controller...');
-const controller = require('./product.controller');
-console.log('🔍 [DEBUG] Controller imported:', typeof controller);
-console.log('🔍 [DEBUG] Controller keys:', Object.keys(controller));
-
-const {
-  getAllProducts,
-  getProductById,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-  getRelatedProducts
-} = controller;
-
-console.log('🔍 [DEBUG] Functions after destructure:');
-console.log('  - getAllProducts:', typeof getAllProducts);
-console.log('  - getProductById:', typeof getProductById);
-console.log('  - createProduct:', typeof createProduct);
-console.log('  - updateProduct:', typeof updateProduct);
-console.log('  - deleteProduct:', typeof deleteProduct);
-console.log('  - getRelatedProducts:', typeof getRelatedProducts);
-
-// 🔥 DEBUG: Import middleware
-console.log('🔍 [DEBUG] Importing verifyAdminToken...');
+const mongoose = require('mongoose'); // 🔥 ADD THIS IMPORT
+const Product = require('./product.model');
 const { verifyAdminToken } = require('../middleware/verifyAdminToken');
-console.log('🔍 [DEBUG] verifyAdminToken:', typeof verifyAdminToken);
 
-// 🔒 DEBUG: Import security
-console.log('🔍 [DEBUG] Importing security config...');
-const securityConfig = require('../config/security');
-console.log('🔍 [DEBUG] Security config:', typeof securityConfig);
-console.log('🔍 [DEBUG] Security keys:', Object.keys(securityConfig));
-
-const { generalLimiter } = securityConfig;
-console.log('🔍 [DEBUG] generalLimiter:', typeof generalLimiter);
-
-console.log('✅ Product routes loaded with security');
+console.log('✅ Product routes loaded');
 
 // =====================================
-// ROUTES WITH DEBUG
+// PUBLIC ROUTES
 // =====================================
 
-console.log('🔍 [DEBUG] Setting up routes...');
+// 🔥 GET ALL PRODUCTS (with pagination, filtering, sorting)
+router.get('/', async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      category,
+      minPrice,
+      maxPrice,
+      search,
+      sort = '-createdAt'
+    } = req.query;
 
-// Route 1
-console.log('🔍 [DEBUG] Route 1: GET /');
-console.log('  - generalLimiter:', typeof generalLimiter);
-console.log('  - getAllProducts:', typeof getAllProducts);
-router.get('/', generalLimiter, getAllProducts);
-console.log('✅ [DEBUG] Route 1 OK');
+    // Build filter object
+    const filter = { isActive: true };
 
-// Route 2
-console.log('🔍 [DEBUG] Route 2: GET /:id/related');
-console.log('  - generalLimiter:', typeof generalLimiter);
-console.log('  - getRelatedProducts:', typeof getRelatedProducts);
-router.get('/:id/related', generalLimiter, getRelatedProducts);
-console.log('✅ [DEBUG] Route 2 OK');
+    if (category) {
+      filter.category = category;
+    }
 
-// Route 3
-console.log('🔍 [DEBUG] Route 3: POST /');
-console.log('  - verifyAdminToken:', typeof verifyAdminToken);
-console.log('  - createProduct:', typeof createProduct);
-router.post('/', verifyAdminToken, createProduct);
-console.log('✅ [DEBUG] Route 3 OK');
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = Number(minPrice);
+      if (maxPrice) filter.price.$lte = Number(maxPrice);
+    }
 
-// Route 4
-console.log('🔍 [DEBUG] Route 4: PUT /:id');
-console.log('  - verifyAdminToken:', typeof verifyAdminToken);
-console.log('  - updateProduct:', typeof updateProduct);
-router.put('/:id', verifyAdminToken, updateProduct);
-console.log('✅ [DEBUG] Route 4 OK');
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
+      ];
+    }
 
-// Route 5
-console.log('🔍 [DEBUG] Route 5: DELETE /:id');
-console.log('  - verifyAdminToken:', typeof verifyAdminToken);
-console.log('  - deleteProduct:', typeof deleteProduct);
-router.delete('/:id', verifyAdminToken, deleteProduct);
-console.log('✅ [DEBUG] Route 5 OK');
+    // Execute query with pagination
+    const products = await Product.find(filter)
+      .sort(sort)
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit))
+      .select('-__v');
 
-// Route 6 - LINE 29 (THE PROBLEM)
-console.log('🔍 [DEBUG] Route 6: GET /:id (LINE 29)');
-console.log('  - generalLimiter:', typeof generalLimiter);
-console.log('  - getProductById:', typeof getProductById);
+    const total = await Product.countDocuments(filter);
 
-if (typeof generalLimiter !== 'function') {
-  console.error('❌ [ERROR] generalLimiter is NOT a function!');
-  console.error('   Type:', typeof generalLimiter);
-  console.error('   Value:', generalLimiter);
-}
+    console.log(`📦 Found ${products.length} products (Total: ${total})`);
 
-if (typeof getProductById !== 'function') {
-  console.error('❌ [ERROR] getProductById is NOT a function!');
-  console.error('   Type:', typeof getProductById);
-  console.error('   Value:', getProductById);
-}
+    res.json({
+      success: true,
+      products,
+      pagination: {
+        total,
+        page: Number(page),
+        pages: Math.ceil(total / Number(limit)),
+        limit: Number(limit)
+      }
+    });
 
-// 🔥 FIX: GET SINGLE PRODUCT - Accept both ObjectId and productId
+  } catch (error) {
+    console.error('❌ Get products error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy danh sách sản phẩm'
+    });
+  }
+});
+
+// 🔥 GET SINGLE PRODUCT - Accept both ObjectId and productId
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -113,8 +87,8 @@ router.get('/:id', async (req, res) => {
     if (mongoose.Types.ObjectId.isValid(id) && id.length === 24) {
       console.log('   → Querying by _id (ObjectId)');
       product = await Product.findOne({ _id: id, isActive: true });
-    } 
-    
+    }
+
     // 🔥 TRY 2: If not found, try productId (Number)
     if (!product && !isNaN(id)) {
       console.log('   → Querying by productId (Number)');
@@ -124,9 +98,9 @@ router.get('/:id', async (req, res) => {
     // 🔥 TRY 3: If still not found, try by name
     if (!product) {
       console.log('   → Querying by name');
-      product = await Product.findOne({ 
+      product = await Product.findOne({
         name: { $regex: new RegExp(id, 'i') },
-        isActive: true 
+        isActive: true
       });
     }
 
@@ -153,8 +127,167 @@ router.get('/:id', async (req, res) => {
     });
   }
 });
-console.log('✅ [DEBUG] Route 6 OK');
 
-console.log('✅ [DEBUG] All routes configured successfully');
+// =====================================
+// ADMIN ROUTES
+// =====================================
+
+// 🔥 CREATE PRODUCT
+router.post('/', verifyAdminToken, async (req, res) => {
+  try {
+    const productData = req.body;
+
+    console.log('📝 Creating product:', productData.name);
+
+    // Validate required fields
+    if (!productData.name || !productData.price) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tên và giá sản phẩm là bắt buộc'
+      });
+    }
+
+    // Generate productId if not provided
+    if (!productData.productId) {
+      productData.productId = Date.now();
+    }
+
+    const product = new Product(productData);
+    await product.save();
+
+    console.log('✅ Product created:', product._id);
+
+    res.status(201).json({
+      success: true,
+      message: 'Tạo sản phẩm thành công',
+      product
+    });
+
+  } catch (error) {
+    console.error('❌ Create product error:', error);
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sản phẩm đã tồn tại (trùng productId hoặc tên)'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi tạo sản phẩm'
+    });
+  }
+});
+
+// 🔥 UPDATE PRODUCT
+router.patch('/:id', verifyAdminToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    console.log('📝 Updating product:', id);
+
+    // Find product by _id or productId
+    let product;
+    if (mongoose.Types.ObjectId.isValid(id) && id.length === 24) {
+      product = await Product.findById(id);
+    } else if (!isNaN(id)) {
+      product = await Product.findOne({ productId: Number(id) });
+    }
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy sản phẩm'
+      });
+    }
+
+    // Update fields
+    Object.keys(updates).forEach(key => {
+      if (key !== '_id' && key !== 'productId') {
+        product[key] = updates[key];
+      }
+    });
+
+    await product.save();
+
+    console.log('✅ Product updated:', product._id);
+
+    res.json({
+      success: true,
+      message: 'Cập nhật sản phẩm thành công',
+      product
+    });
+
+  } catch (error) {
+    console.error('❌ Update product error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi cập nhật sản phẩm'
+    });
+  }
+});
+
+// 🔥 DELETE PRODUCT (Soft delete)
+router.delete('/:id', verifyAdminToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log('🗑️ Deleting product:', id);
+
+    // Find product by _id or productId
+    let product;
+    if (mongoose.Types.ObjectId.isValid(id) && id.length === 24) {
+      product = await Product.findById(id);
+    } else if (!isNaN(id)) {
+      product = await Product.findOne({ productId: Number(id) });
+    }
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy sản phẩm'
+      });
+    }
+
+    // Soft delete
+    product.isActive = false;
+    await product.save();
+
+    console.log('✅ Product deleted (soft):', product._id);
+
+    res.json({
+      success: true,
+      message: 'Xóa sản phẩm thành công'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete product error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi xóa sản phẩm'
+    });
+  }
+});
+
+// 🔥 GET CATEGORIES
+router.get('/categories/all', async (req, res) => {
+  try {
+    const categories = await Product.distinct('category', { isActive: true });
+
+    res.json({
+      success: true,
+      categories: categories.filter(Boolean) // Remove null/undefined
+    });
+
+  } catch (error) {
+    console.error('❌ Get categories error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy danh mục'
+    });
+  }
+});
 
 module.exports = router;
