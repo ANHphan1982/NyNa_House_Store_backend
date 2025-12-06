@@ -1,9 +1,10 @@
 // backend/src/middleware/verifyAdminToken.js
 const jwt = require('jsonwebtoken');
 
-// Verify Admin Token
+// Verify Admin Token (with Cookie Support)
 const verifyAdminToken = (req, res, next) => {
   try {
+    // 🔥 TRY COOKIE FIRST, then Authorization header
     let token = req.cookies?.adminToken;
     
     if (!token) {
@@ -11,6 +12,7 @@ const verifyAdminToken = (req, res, next) => {
     }
     
     console.log('🔐 [Admin] Verifying token:', token ? 'Token exists' : 'No token');
+    console.log('🍪 [Admin] Token from cookie:', !!req.cookies?.adminToken);
     
     if (!token) {
       return res.status(401).json({ 
@@ -19,6 +21,7 @@ const verifyAdminToken = (req, res, next) => {
       });
     }
 
+    // Try JWT_ADMIN_SECRET first
     jwt.verify(token, process.env.JWT_ADMIN_SECRET || process.env.JWT_SECRET, (err, decoded) => {
       if (err) {
         console.error('❌ [Admin] Token verification failed:', err.message);
@@ -28,6 +31,7 @@ const verifyAdminToken = (req, res, next) => {
         });
       }
 
+      // Check role
       if (decoded.role !== 'admin') {
         return res.status(403).json({ 
           success: false, 
@@ -49,9 +53,10 @@ const verifyAdminToken = (req, res, next) => {
   }
 };
 
-// Verify User Token
+// Verify User Token (with Cookie Support)
 const verifyToken = (req, res, next) => {
   try {
+    // 🔥 TRY COOKIE FIRST, then Authorization header
     let token = req.cookies?.userToken;
     
     if (!token) {
@@ -59,6 +64,7 @@ const verifyToken = (req, res, next) => {
     }
     
     console.log('🔐 [User] Verifying token:', token ? 'Token exists' : 'No token');
+    console.log('🍪 [User] Token from cookie:', !!req.cookies?.userToken);
     
     if (!token) {
       return res.status(401).json({ 
@@ -90,7 +96,7 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// 🔥 NEW: Verify Token Or Admin (Accept both)
+// 🔥 NEW: Verify Token Or Admin (Accept both) with Cookie Support
 const verifyTokenOrAdmin = (req, res, next) => {
   try {
     // Try to get token from cookies or header
@@ -101,6 +107,7 @@ const verifyTokenOrAdmin = (req, res, next) => {
     }
     
     console.log('🔐 [TokenOrAdmin] Verifying token:', token ? 'Token exists' : 'No token');
+    console.log('🍪 [TokenOrAdmin] Token from cookie:', !!(req.cookies?.adminToken || req.cookies?.userToken));
     
     if (!token) {
       return res.status(401).json({ 
@@ -150,5 +157,5 @@ const verifyTokenOrAdmin = (req, res, next) => {
 module.exports = { 
   verifyAdminToken, 
   verifyToken,
-  verifyTokenOrAdmin // 🔥 NEW: Export new middleware
+  verifyTokenOrAdmin
 };

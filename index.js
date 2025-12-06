@@ -1,6 +1,7 @@
 // backend/index.js
 const express = require('express');
 const mongoose = require('mongoose');
+const cookieParser = require('cookie-parser'); // 🔥 NEW: Add cookie-parser
 require('dotenv').config();
 
 // 🔒 IMPORT SECURITY CONFIGURATION
@@ -19,13 +20,19 @@ console.log('🔒 Initializing security...');
 setupSecurity(app);
 
 // =========================================
-// 2. BODY PARSER (AFTER SECURITY)
+// 2. COOKIE PARSER (BEFORE ROUTES)
+// =========================================
+app.use(cookieParser()); // 🔥 NEW: Parse cookies
+console.log('🍪 Cookie parser initialized');
+
+// =========================================
+// 3. BODY PARSER (AFTER SECURITY)
 // =========================================
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // =========================================
-// 3. REQUEST LOGGER
+// 4. REQUEST LOGGER
 // =========================================
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
@@ -35,7 +42,7 @@ app.use((req, res, next) => {
 });
 
 // =========================================
-// 4. IMPORT ROUTES
+// 5. IMPORT ROUTES
 // =========================================
 const productRoutes = require('./src/products/product.route');
 const orderRoutes = require('./src/orders/order.route');
@@ -43,7 +50,7 @@ const userRoutes = require('./src/users/user.route');
 const adminRoutes = require('./src/admin/admin.route');
 
 // =========================================
-// 5. MOUNT ROUTES
+// 6. MOUNT ROUTES
 // =========================================
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
@@ -51,7 +58,7 @@ app.use('/api/auth', userRoutes);
 app.use('/api/admin', adminRoutes);
 
 // =========================================
-// 6. ROOT & HEALTH CHECK ROUTES
+// 7. ROOT & HEALTH CHECK ROUTES
 // =========================================
 
 // Root route
@@ -65,7 +72,8 @@ app.get('/', (req, res) => {
       rateLimiting: 'enabled',
       xssProtection: 'enabled',
       mongoSanitization: 'enabled',
-      helmet: 'enabled'
+      helmet: 'enabled',
+      httpOnlyCookies: 'enabled' // 🔥 NEW
     },
     features: {
       '2FA': 'Email OTP verification',
@@ -73,7 +81,8 @@ app.get('/', (req, res) => {
       'Products': 'CRUD operations',
       'Orders': 'Order management with validation',
       'Users': 'Authentication & authorization',
-      'Security': 'Rate limiting, input sanitization'
+      'Security': 'Rate limiting, input sanitization, httpOnly cookies', // 🔥 UPDATED
+      'Cookies': 'Secure JWT storage in httpOnly cookies' // 🔥 NEW
     },
     endpoints: {
       products: '/api/products',
@@ -94,7 +103,8 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV || 'development',
     services: {
       mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-      email: process.env.EMAIL_USER ? 'configured' : 'not configured'
+      email: process.env.EMAIL_USER ? 'configured' : 'not configured',
+      cookies: process.env.COOKIE_SECRET ? 'configured' : 'not configured' // 🔥 NEW
     },
     memory: {
       used: Math.floor(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
@@ -106,7 +116,7 @@ app.get('/health', (req, res) => {
 });
 
 // =========================================
-// 7. ERROR HANDLERS
+// 8. ERROR HANDLERS
 // =========================================
 
 // 404 handler
@@ -191,7 +201,7 @@ app.use((err, req, res, next) => {
 });
 
 // =========================================
-// 8. SERVER STARTUP
+// 9. SERVER STARTUP
 // =========================================
 
 let server;
@@ -222,8 +232,19 @@ const startServer = async () => {
       console.warn('📝 Please set EMAIL_USER and EMAIL_PASSWORD in .env file');
     }
     
-    // Step 3: Start HTTP Server
-    console.log('\n🌐 Step 3: Starting HTTP server...');
+    // 🔥 NEW: Step 3: Verify Cookie Configuration
+    console.log('\n🍪 Step 3: Verifying cookie configuration...');
+    if (process.env.COOKIE_SECRET) {
+      console.log('✅ Cookie secret configured');
+      console.log(`🔒 Cookie max age: ${process.env.COOKIE_MAX_AGE || '7 days'}`);
+      console.log(`🌐 Cookie domain: ${process.env.COOKIE_DOMAIN || 'default'}`);
+    } else {
+      console.warn('⚠️ COOKIE_SECRET not set');
+      console.warn('💡 Cookies will still work but consider setting COOKIE_SECRET for signing');
+    }
+    
+    // Step 4: Start HTTP Server
+    console.log('\n🌐 Step 4: Starting HTTP server...');
     server = app.listen(port, () => {
       console.log('✅ HTTP server started successfully');
       console.log('\n' + '='.repeat(70));
@@ -239,10 +260,11 @@ const startServer = async () => {
       console.log(`   ✓ CORS Protection`);
       console.log(`   ✓ Helmet Security Headers`);
       console.log(`   ✓ Input Validation & Sanitization`);
+      console.log(`   ✓ HttpOnly Cookies (JWT Storage)`); // 🔥 NEW
       console.log(`\n📱 Features:`);
       console.log(`   ✓ Two-Factor Authentication (2FA) via Email`);
       console.log(`   ✓ Admin OTP Verification`);
-      console.log(`   ✓ Secure JWT Tokens`);
+      console.log(`   ✓ Secure JWT Tokens (in httpOnly cookies)`); // 🔥 UPDATED
       console.log(`   ✓ Password Policy (8+ chars, uppercase, lowercase, number, special char)`);
       console.log(`\n📚 API Endpoints:`);
       console.log(`   🛍️  Products: /api/products`);
@@ -269,7 +291,7 @@ const startServer = async () => {
 startServer();
 
 // =========================================
-// 9. PROCESS EVENT HANDLERS
+// 10. PROCESS EVENT HANDLERS
 // =========================================
 
 // Handle unhandled promise rejections

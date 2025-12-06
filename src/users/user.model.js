@@ -1,6 +1,7 @@
 // backend/src/users/user.model.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -18,7 +19,6 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     validate: {
       validator: function(v) {
-        // Allow temp emails or validate real emails
         if (!v) return true;
         if (v.includes('@temp.local')) return true;
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -42,7 +42,7 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     required: [true, 'Mật khẩu là bắt buộc'],
-    minlength: [8, 'Mật khẩu phải có ít nhất 8 ký tự'] // 🔒 CHANGED FROM 6 TO 8
+    minlength: [8, 'Mật khẩu phải có ít nhất 8 ký tự']
   },
   role: {
     type: String,
@@ -54,6 +54,27 @@ const userSchema = new mongoose.Schema({
     enum: ['email', 'phone'],
     required: true
   },
+  
+  // 🔥 NEW FIELDS FOR EMAIL VERIFICATION
+  isEmailVerified: {
+    type: Boolean,
+    default: false
+  },
+  emailVerificationToken: {
+    type: String
+  },
+  emailVerificationExpiry: {
+    type: Date
+  },
+  
+  // 🔥 NEW FIELDS FOR PASSWORD RESET
+  passwordResetToken: {
+    type: String
+  },
+  passwordResetExpiry: {
+    type: Date
+  },
+  
   address: {
     street: String,
     city: String,
@@ -69,7 +90,6 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
-  // 🔒 SECURITY FIELDS (for future use)
   loginAttempts: {
     type: Number,
     default: 0
@@ -88,6 +108,8 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ email: 1 });
 userSchema.index({ phone: 1 });
 userSchema.index({ isActive: 1 });
+userSchema.index({ emailVerificationToken: 1 });
+userSchema.index({ passwordResetToken: 1 });
 
 // 🔒 VIRTUAL for account lock status
 userSchema.virtual('isLocked').get(function() {
@@ -99,7 +121,6 @@ userSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   
   try {
-    // Use salt rounds of 12 for better security
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);
     console.log('🔒 Password hashed for user:', this.email || this.phone);
@@ -120,9 +141,42 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   }
 };
 
+// 🔥 NEW METHOD: Generate Email Verification Token
+userSchema.methods.generateEmailVerificationToken = function() {
+  // Generate random token
+  const verificationToken = crypto.randomBytes(32).toString('hex');
+  
+  // Hash token before storing
+  this.emailVerificationToken = crypto
+    .createHash('sha256')
+    .update(verificationToken)
+    .digest('hex');
+  
+  // Set expiry (24 hours)
+  this.emailVerificationExpiry = Date.now() + 24 * 60 * 60 * 1000;
+  
+  return verificationToken; // Return unhashed token to send via email
+};
+
+// 🔥 NEW METHOD: Generate Password Reset Token
+userSchema.methods.generatePasswordResetToken = function() {
+  // Generate random token
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  
+  // Hash token before storing
+  this.passwordResetToken = crypto
+    .createHash('sha256')
+    .update(resetToken)
+    .digest('hex');
+  
+  // Set expiry (1 hour)
+  this.passwordResetExpiry = Date.now() + 60 * 60 * 1000;
+  
+  return resetToken; // Return unhashed token to send via email
+};
+
 // 🔒 Method to handle failed login
 userSchema.methods.incLoginAttempts = async function() {
-  // If we have a previous lock that has expired, restart at 1
   if (this.lockUntil && this.lockUntil < Date.now()) {
     return this.updateOne({
       $set: { loginAttempts: 1 },
@@ -130,13 +184,11 @@ userSchema.methods.incLoginAttempts = async function() {
     });
   }
   
-  // Otherwise increment
   const updates = { $inc: { loginAttempts: 1 } };
-  
-  // Lock account after 5 failed attempts
   const maxAttempts = 5;
+  
   if (this.loginAttempts + 1 >= maxAttempts && !this.isLocked) {
-    updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 }; // 2 hours
+    updates.$set = { lockUntil: Date.now() + 2 * 60 * 60 * 1000 };
   }
   
   return this.updateOne(updates);
@@ -156,6 +208,10 @@ userSchema.methods.toJSON = function() {
   delete obj.password;
   delete obj.loginAttempts;
   delete obj.lockUntil;
+  delete obj.emailVerificationToken;
+  delete obj.emailVerificationExpiry;
+  delete obj.passwordResetToken;
+  delete obj.passwordResetExpiry;
   return obj;
 };
 

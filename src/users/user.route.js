@@ -6,6 +6,9 @@ const jwt = require('jsonwebtoken');
 const { verifyToken } = require('../middleware/verifyAdminToken');
 const nodemailer = require('nodemailer');
 const otpGenerator = require('otp-generator');
+const { sendVerificationEmail, resendVerificationEmail } = require('./emailVerification');
+const crypto = require('crypto');
+const { sendPasswordResetEmail } = require('./passwordReset');
 
 // 🔒 IMPORT SECURITY
 const { authLimiter } = require('../config/security');
@@ -167,31 +170,23 @@ router.post('/login', authLimiter, async (req, res) => {
 });
 
 // =====================================
-// ROUTE 2: USER REGISTER
-// =====================================
+
+// ROUTE 2: USER REGISTER (with optional email verification)
 router.post('/register', authLimiter, async (req, res) => {
   try {
     console.log('📝 User registration attempt');
     
     const { name, email, phone, password } = req.body;
 
-    // ✅ Sanitize and prepare data (FIXED - no sanitizeName)
+    // Sanitize and prepare data
     const sanitizedData = {
-      name: name ? name.trim() : undefined,  // 🔥 FIXED
+      name: sanitizeName(name),
       email: email ? email.trim().toLowerCase() : undefined,
       phone: phone ? phone.trim() : undefined,
       password: password
     };
 
-    console.log('📋 Registration data:', {
-      name: sanitizedData.name,
-      email: sanitizedData.email,
-      phone: sanitizedData.phone,
-      hasPassword: !!sanitizedData.password
-    });
-
-
-    // ✅ Validate input
+    // Validate input
     const validation = validateRegistrationData(sanitizedData);
     if (!validation.isValid) {
       console.log('❌ Validation failed:', validation.errors);
@@ -235,7 +230,336 @@ router.post('/register', authLimiter, async (req, res) => {
         }
       }
     }
+    // 🔥 NEW ROUTE: VERIFY EMAIL
+router.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    
+    console.log('📧 Email verification attempt');
+    
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token xác thực không hợp lệ'
+      });
+    }
 
+    // Hash the token to match stored token
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // Find user with this token
+    const user = await User.findOne({
+      emailVerificationToken: hashedToken,
+      emailVerificationExpiry: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      console.log('❌ Invalid or expired token');
+      return res.status(400).json({
+        success: false,
+        message: 'Token xác thực không hợp lệ hoặc đã hết hạn'
+      });
+    }
+
+    // Mark email as verified
+    user.isEmailVerified = true;
+    user.emailVerificationToken = undefined;
+    user.emailVerificationExpiry = undefined;
+    await user.save();
+
+    console.log('✅ Email verified for user:', user.email);
+
+    res.json({
+      success: true,
+      message: 'Xác thực email thành công! Bạn đã mở khóa đầy đủ tính năng.',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isEmailVerified: user.isEmailVerified
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Email verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
+    });
+  }
+});
+// 🔥 NEW ROUTE: RESEND VERIFICATION EMAIL
+router.post('/resend-verification', verifyToken, async (req, res) => {
+  try {
+    console.log('📧 Resend verification email request');
+    
+    const user = await User.findById(req.userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy người dùng'
+      });
+    }
+
+    // Check if already verified
+    if (user.isEmailVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email đã được xác thực'
+      });
+    }
+
+    // Check if user registered with email
+    if (!user.email || user.registerType !== 'email') {
+      return res.status(400).json({
+        success: false,
+        message: 'Tài khoản không được đăng ký bằng email'
+      });
+    }
+
+    // Generate new token
+    const verificationToken = user.generateEmailVerificationToken();
+    await user.save();
+
+    // Send email
+    const emailResult = await resendVerificationEmail(user, verificationToken);
+
+    if (!emailResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: 'Không thể gửi email. Vui lòng thử lại sau.'
+      });
+    }
+
+    console.log('✅ Verification email resent');
+
+    res.json({
+      success: true,
+      message: 'Email xác thực đã được gửi lại. Vui lòng check hộp thư.'
+    });
+
+  } catch (error) {
+    console.error('❌ Resend verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
+    });
+  }
+});
+// 🔥 NEW ROUTE: REQUEST PASSWORD RESET
+router.post('/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    console.log('🔑 Password reset request for:', email);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email là bắt buộc'
+      });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Find user by email
+    const user = await User.findOne({ email: cleanEmail });
+
+    // 🔒 SECURITY: Always return success (don't reveal if email exists)
+    if (!user) {
+      console.log('⚠️ Email not found, but returning success for security');
+      return res.json({
+        success: true,
+        message: 'Nếu email tồn tại, chúng tôi đã gửi link đặt lại mật khẩu.'
+      });
+    }
+
+    // Check if user registered with phone (no email)
+    if (user.registerType === 'phone' && !user.email) {
+      console.log('⚠️ User registered with phone, cannot reset password via email');
+      return res.status(400).json({
+        success: false,
+        message: 'Tài khoản này không được đăng ký bằng email. Vui lòng liên hệ support.'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = user.generatePasswordResetToken();
+    await user.save();
+
+    // Send email
+    const emailResult = await sendPasswordResetEmail(user, resetToken);
+
+    if (!emailResult.success) {
+      console.error('❌ Failed to send password reset email');
+      user.passwordResetToken = undefined;
+      user.passwordResetExpiry = undefined;
+      await user.save();
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Không thể gửi email. Vui lòng thử lại sau.'
+      });
+    }
+
+    console.log('✅ Password reset email sent');
+
+    res.json({
+      success: true,
+      message: 'Chúng tôi đã gửi link đặt lại mật khẩu đến email của bạn. Vui lòng check hộp thư.'
+    });
+
+  } catch (error) {
+    console.error('❌ Forgot password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
+    });
+  }
+});
+// 🔥 NEW ROUTE: REQUEST PASSWORD RESET
+router.post('/forgot-password', authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    console.log('🔑 Password reset request for:', email);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email là bắt buộc'
+      });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Find user by email
+    const user = await User.findOne({ email: cleanEmail });
+
+    // 🔒 SECURITY: Always return success (don't reveal if email exists)
+    if (!user) {
+      console.log('⚠️ Email not found, but returning success for security');
+      return res.json({
+        success: true,
+        message: 'Nếu email tồn tại, chúng tôi đã gửi link đặt lại mật khẩu.'
+      });
+    }
+
+    // Check if user registered with phone (no email)
+    if (user.registerType === 'phone' && !user.email) {
+      console.log('⚠️ User registered with phone, cannot reset password via email');
+      return res.status(400).json({
+        success: false,
+        message: 'Tài khoản này không được đăng ký bằng email. Vui lòng liên hệ support.'
+      });
+    }
+
+    // Generate reset token
+    const resetToken = user.generatePasswordResetToken();
+    await user.save();
+
+    // Send email
+    const emailResult = await sendPasswordResetEmail(user, resetToken);
+
+    if (!emailResult.success) {
+      console.error('❌ Failed to send password reset email');
+      user.passwordResetToken = undefined;
+      user.passwordResetExpiry = undefined;
+      await user.save();
+      
+      return res.status(500).json({
+        success: false,
+        message: 'Không thể gửi email. Vui lòng thử lại sau.'
+      });
+    }
+
+    console.log('✅ Password reset email sent');
+
+    res.json({
+      success: true,
+      message: 'Chúng tôi đã gửi link đặt lại mật khẩu đến email của bạn. Vui lòng check hộp thư.'
+    });
+
+  } catch (error) {
+    console.error('❌ Forgot password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
+    });
+  }
+});
+
+// 🔥 NEW ROUTE: RESET PASSWORD
+router.post('/reset-password', authLimiter, async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    
+    console.log('🔑 Password reset attempt');
+
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token và mật khẩu mới là bắt buộc'
+      });
+    }
+
+    // Validate new password
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      return res.status(400).json({
+        success: false,
+        message: passwordValidation.message
+      });
+    }
+
+    // Hash the token to match stored token
+    const hashedToken = crypto
+      .createHash('sha256')
+      .update(token)
+      .digest('hex');
+
+    // Find user with this token
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpiry: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      console.log('❌ Invalid or expired reset token');
+      return res.status(400).json({
+        success: false,
+        message: 'Token không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu đặt lại mật khẩu mới.'
+      });
+    }
+
+    // Set new password
+    user.password = newPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpiry = undefined;
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
+    
+    await user.save();
+
+    console.log('✅ Password reset successful for user:', user.email);
+
+    res.json({
+      success: true,
+      message: 'Đặt lại mật khẩu thành công! Bạn có thể đăng nhập với mật khẩu mới.'
+    });
+
+  } catch (error) {
+    console.error('❌ Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Đã xảy ra lỗi. Vui lòng thử lại sau.'
+    });
+  }
+});
     // Create new user
     const newUser = new User({
       name: sanitizedData.name,
@@ -243,23 +567,51 @@ router.post('/register', authLimiter, async (req, res) => {
       phone: sanitizedData.phone,
       password: sanitizedData.password,
       registerType: registerType,
-      role: 'user'
+      role: 'user',
+      isEmailVerified: false // 🔥 Default to unverified
     });
 
     await newUser.save();
     console.log('✅ User created:', newUser._id);
 
-    // Generate JWT token
+    // 🔥 SEND VERIFICATION EMAIL (if registered with email)
+    let verificationEmailSent = false;
+    if (registerType === 'email' && sanitizedData.email) {
+      try {
+        const verificationToken = newUser.generateEmailVerificationToken();
+        await newUser.save();
+        
+        const emailResult = await sendVerificationEmail(newUser, verificationToken);
+        verificationEmailSent = emailResult.success;
+        
+        if (verificationEmailSent) {
+          console.log('✅ Verification email sent');
+        } else {
+          console.log('⚠️ Verification email failed to send');
+        }
+      } catch (emailError) {
+        console.error('⚠️ Error sending verification email:', emailError);
+        // Don't fail registration if email fails
+      }
+    } else {
+      console.log('ℹ️ User registered with phone - skipping email verification');
+    }
+
+    // Generate JWT token (user can use immediately)
     const token = jwt.sign(
       { 
         userId: newUser._id,
         email: newUser.email,
         phone: newUser.phone,
-        role: newUser.role
+        role: newUser.role,
+        isEmailVerified: newUser.isEmailVerified // 🔥 Include verification status
       },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
+
+    // Set cookie
+    res.cookie('userToken', token, getCookieOptions());
 
     console.log('✅ Registration successful');
 
@@ -272,14 +624,20 @@ router.post('/register', authLimiter, async (req, res) => {
         name: newUser.name,
         email: newUser.email,
         phone: newUser.phone,
-        role: newUser.role
-      }
+        role: newUser.role,
+        isEmailVerified: newUser.isEmailVerified,
+        registerType: newUser.registerType
+      },
+      verificationEmailSent: verificationEmailSent,
+      // 🔥 Notify about verification benefits
+      message: verificationEmailSent 
+        ? 'Đăng ký thành công! Vui lòng check email để xác thực tài khoản và mở khóa đầy đủ tính năng.'
+        : 'Đăng ký thành công!'
     });
 
   } catch (error) {
     console.error('❌ Registration error:', error);
     
-    // Handle MongoDB duplicate key error
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
       return res.status(400).json({
