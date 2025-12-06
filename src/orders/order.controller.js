@@ -3,256 +3,184 @@ const Order = require('./order.model');
 const Product = require('../products/product.model');
 const mongoose = require('mongoose');
 
-// 🔒 IMPORT VALIDATION
-const {
-  validateOrderData,
-  validateNumber,
-  sanitizeString,
-  sanitizeObject
-} = require('../utils/validation');
+// =====================================
+// 1. CREATE ORDER (User or Guest)
+// =====================================
 
-// =====================================
-// 1. CREATE ORDER
-// =====================================
 const createOrder = async (req, res) => {
   try {
-    console.log('📦 Creating order for user:', req.userId);
+    const { products, shippingAddress, paymentMethod, note, guestInfo } = req.body;
+    const userId = req.userId; // May be null for guest orders
+
+    console.log('📦 Creating order:', userId ? `User: ${userId}` : 'Guest order');
+    console.log('✅ Order has', products?.length, 'items');
     
-    // 🔒 SANITIZE INPUT
-    const sanitizedBody = sanitizeObject(req.body);
-    
-    const { 
-      products,
-      items,
-      shippingAddress, 
-      paymentMethod, 
-      notes,
-      note,
-      subtotal,
-      shippingFee, 
-      totalAmount 
-    } = sanitizedBody;
-
-    // Accept both "products" and "items"
-    const orderItems = products || items;
-
-    // 🔒 VALIDATE ORDER DATA
-    const validation = validateOrderData({
-      products: orderItems,
-      shippingAddress,
-      paymentMethod
-    });
-
-    if (!validation.isValid) {
-      console.log('❌ Validation failed:', validation.errors);
+    // 🔥 VALIDATE: Guest orders need guestInfo
+    if (!userId && !guestInfo) {
       return res.status(400).json({
         success: false,
-        message: Object.values(validation.errors)[0],
-        errors: validation.errors
+        message: 'Thông tin người mua là bắt buộc (tên, số điện thoại)'
+      });
+    }
+    
+    // Validate guestInfo if provided
+    if (guestInfo) {
+      if (!guestInfo.name || guestInfo.name.trim().length < 2) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tên phải có ít nhất 2 ký tự'
+        });
+      }
+      
+      if (!guestInfo.phone || !/^0\d{9}$/.test(guestInfo.phone)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Số điện thoại không hợp lệ'
+        });
+      }
+    }
+
+    // Validate products
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Đơn hàng phải có ít nhất 1 sản phẩm'
       });
     }
 
-    console.log('✅ Order has', orderItems.length, 'items');
+    // Validate shipping address
+    if (!shippingAddress || !shippingAddress.fullName || !shippingAddress.phone || !shippingAddress.address) {
+      return res.status(400).json({
+        success: false,
+        message: 'Thông tin giao hàng không đầy đủ'
+      });
+    }
 
-    // =====================================
-    // STEP 1: VALIDATE & FIND PRODUCTS
-    // =====================================
-    const productChecks = [];
+    // Validate and convert products
     const validatedItems = [];
     
-    for (let i = 0; i < orderItems.length; i++) {
-      const item = orderItems[i];
+    for (let i = 0; i < products.length; i++) {
+      const item = products[i];
+      let product;
       
-      console.log(`🔍 Processing item ${i}:`, {
-        productId: item.productId,
-        name: item.name,
-        quantity: item.quantity
-      });
-      
-      // 🔒 VALIDATE quantity
-      const quantityValidation = validateNumber(item.quantity, {
-        min: 1,
-        max: 9999,
-        integer: true
-      });
-      
-      if (!quantityValidation.isValid) {
-        return res.status(400).json({
-          success: false,
-          message: `Số lượng sản phẩm "${item.name}" không hợp lệ`
-        });
+      console.log(`🔍 Processing item ${i}:`, item);
+
+      // Try to find product by _id or productId
+      if (mongoose.Types.ObjectId.isValid(item.productId) && item.productId.length === 24) {
+        console.log('   → Querying by _id (ObjectId):', item.productId);
+        product = await Product.findOne({ _id: item.productId, isActive: true });
+      } else if (!isNaN(item.productId)) {
+        console.log('   → Querying by productId (Number):', item.productId);
+        product = await Product.findOne({ productId: Number(item.productId), isActive: true });
       }
 
-      // 🔥 FIX: FIND PRODUCT - Handle both ObjectId and Number
-      let product = null;
-      
-      if (item.productId) {
-        // Check if productId is ObjectId (24 character hex string)
-        if (mongoose.Types.ObjectId.isValid(item.productId) && 
-            typeof item.productId === 'string' && 
-            item.productId.length === 24) {
-          
-          console.log(`   → Querying by _id (ObjectId): ${item.productId}`);
-          product = await Product.findOne({ 
-            _id: item.productId,
-            isActive: true
-          });
-          
-          if (product) {
-            console.log(`   ✅ Found by _id: ${product.name}`);
-          }
-        } 
-        // Check if productId is a number
-        else if (!isNaN(item.productId)) {
-          console.log(`   → Querying by productId (Number): ${item.productId}`);
-          product = await Product.findOne({ 
-            productId: Number(item.productId),
-            isActive: true
-          });
-          
-          if (product) {
-            console.log(`   ✅ Found by productId: ${product.name}`);
-          }
-        }
-      }
-      
-      // Fallback: Try finding by name
       if (!product && item.name) {
-        console.log(`   → Fallback: Querying by name: ${item.name}`);
-        product = await Product.findOne({ 
-          name: item.name,
-          isActive: true
-        });
-        
-        if (product) {
-          console.log(`   ✅ Found by name: ${product.name}`);
-        }
+        console.log('   → Querying by name:', item.name);
+        product = await Product.findOne({ name: item.name, isActive: true });
       }
 
       if (!product) {
-        console.log(`   ❌ Product not found:`, item);
-        return res.status(404).json({
-          success: false,
-          message: `Không tìm thấy sản phẩm: ${item.name || item.productId}`
-        });
-      }
-
-      // Check stock
-      if (product.stock !== undefined && product.stock < item.quantity) {
+        console.log(`❌ Product not found:`, item.productId);
         return res.status(400).json({
           success: false,
-          message: `Sản phẩm "${product.name}" chỉ còn ${product.stock} trong kho`
+          message: `Sản phẩm không tồn tại: ${item.name || item.productId}`
         });
       }
 
-      productChecks.push({
-        product: product,
-        quantity: quantityValidation.value || item.quantity
-      });
+      console.log(`   ✅ Found by _id: ${product.name}`);
+
+      // Check stock
+      if (product.stock < item.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Sản phẩm "${product.name}" không đủ hàng (còn ${product.stock})`
+        });
+      }
 
       validatedItems.push({
-        productId: product._id, // 🔥 Always use _id (ObjectId) for order items
-        name: sanitizeString(product.name),
-        quantity: quantityValidation.value || item.quantity,
-        price: item.price || product.price,
-        size: item.selectedSize || item.size || null,
-        image: product.image || item.image
+        productId: product._id,
+        name: product.name,
+        price: product.price,
+        quantity: item.quantity,
+        size: item.size || 'M',
+        image: product.image
       });
     }
 
     console.log('✅ All products validated');
 
-    // =====================================
-    // STEP 2: VALIDATE PAYMENT METHOD
-    // =====================================
-    const normalizedPaymentMethod = (paymentMethod || 'cod').toUpperCase();
-    const validMethods = ['COD', 'BANK', 'CARD', 'MOMO', 'ZALOPAY'];
+    // Calculate totals
+    const subtotal = validatedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const shippingFee = 30000; // Fixed shipping fee
+    const totalAmount = subtotal + shippingFee;
+
+    console.log('💰 Order totals:', { subtotal, shippingFee, total: totalAmount });
+
+    // 🔥 CREATE ORDER (with optional userId and guestInfo)
+    const orderData = {
+      items: validatedItems,
+      shippingAddress,
+      paymentMethod: paymentMethod || 'COD',
+      subtotal,
+      shippingFee,
+      totalAmount,
+      note: note || '',
+      status: 'pending',
+      paymentStatus: 'pending'
+    };
     
-    if (!validMethods.includes(normalizedPaymentMethod)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Phương thức thanh toán không hợp lệ'
-      });
+    // Add userId if user is logged in
+    if (userId) {
+      orderData.userId = userId;
+      orderData.orderType = 'user';
+    } else {
+      // Guest order
+      orderData.guestInfo = {
+        name: guestInfo.name.trim(),
+        phone: guestInfo.phone.trim(),
+        email: guestInfo.email?.trim() || shippingAddress.email?.trim()
+      };
+      orderData.orderType = 'guest';
     }
 
-    // =====================================
-    // STEP 3: CALCULATE TOTALS
-    // =====================================
-    const calculatedSubtotal = subtotal || validatedItems.reduce(
-      (sum, item) => sum + (item.price * item.quantity), 0
-    );
-    const calculatedShippingFee = shippingFee !== undefined ? shippingFee : 30000;
-    const calculatedTotal = totalAmount || (calculatedSubtotal + calculatedShippingFee);
+    const order = new Order(orderData);
+    await order.save();
 
-    console.log('💰 Order totals:', {
-      subtotal: calculatedSubtotal,
-      shippingFee: calculatedShippingFee,
-      total: calculatedTotal
-    });
+    console.log('✅ Order saved:', order._id);
 
-    // =====================================
-    // STEP 4: CREATE ORDER
-    // =====================================
-    const newOrder = new Order({
-      userId: req.userId,
-      items: validatedItems,
-      shippingAddress: {
-        fullName: sanitizeString(shippingAddress.fullName, 100),
-        phone: sanitizeString(shippingAddress.phone, 20),
-        email: sanitizeString(shippingAddress.email || '', 255),
-        address: sanitizeString(shippingAddress.address, 500),
-        ward: sanitizeString(shippingAddress.ward || 'N/A', 100),
-        district: sanitizeString(shippingAddress.district || 'N/A', 100),
-        city: sanitizeString(shippingAddress.city || 'N/A', 100)
-      },
-      paymentMethod: normalizedPaymentMethod,
-      note: sanitizeString(notes || note || '', 1000),
-      subtotal: calculatedSubtotal,
-      shippingFee: calculatedShippingFee,
-      totalAmount: calculatedTotal
-    });
-
-    await newOrder.save();
-    console.log('✅ Order saved:', newOrder._id);
-
-    // =====================================
-    // STEP 5: UPDATE STOCK
-    // =====================================
-    for (let check of productChecks) {
-      if (check.product.stock !== undefined) {
-        const oldStock = check.product.stock;
-        
-        await Product.findByIdAndUpdate(
-          check.product._id,
-          {
-            $inc: { 
-              stock: -check.quantity,
-              soldCount: check.quantity
-            }
-          }
-        );
-        
-        console.log(`📉 ${check.product.name}: ${oldStock} → ${oldStock - check.quantity}`);
+    // Update product stock
+    for (const item of validatedItems) {
+      const updateResult = await Product.findByIdAndUpdate(
+        item.productId,
+        { $inc: { stock: -item.quantity } },
+        { new: true }
+      );
+      
+      if (updateResult) {
+        console.log(`📉 ${updateResult.name}: ${updateResult.stock + item.quantity} → ${updateResult.stock}`);
       }
     }
 
-    console.log('✅ Order created successfully:', newOrder._id);
+    console.log('✅ Order created successfully');
 
     res.status(201).json({
       success: true,
       message: 'Đặt hàng thành công',
       order: {
-        _id: newOrder._id,
-        orderNumber: newOrder._id.toString().slice(-8),
-        totalAmount: newOrder.totalAmount,
-        status: newOrder.status,
-        createdAt: newOrder.createdAt
+        _id: order._id,
+        orderNumber: order.orderNumber,
+        items: order.items,
+        totalAmount: order.totalAmount,
+        status: order.status,
+        orderType: order.orderType,
+        createdAt: order.createdAt
       }
     });
+
   } catch (error) {
     console.error('❌ Create order error:', error);
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: 'Lỗi khi tạo đơn hàng: ' + error.message
     });
   }
@@ -261,28 +189,23 @@ const createOrder = async (req, res) => {
 // =====================================
 // 2. GET USER ORDERS
 // =====================================
+
 const getUserOrders = async (req, res) => {
   try {
-    console.log('🔍 Fetching orders for user:', req.userId);
-
-    // 🔒 VALIDATE limit parameter
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-
     const orders = await Order.find({ userId: req.userId })
-      .sort({ createdAt: -1 })
-      .limit(limit);
-
-    console.log('📦 Found orders:', orders.length);
+      .sort('-createdAt')
+      .populate('items.productId', 'name image price');
 
     res.json({
       success: true,
       orders
     });
+
   } catch (error) {
     console.error('❌ Get user orders error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Lỗi khi lấy danh sách đơn hàng' 
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy danh sách đơn hàng'
     });
   }
 };
@@ -290,10 +213,12 @@ const getUserOrders = async (req, res) => {
 // =====================================
 // 3. GET ORDER BY ID
 // =====================================
+
 const getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-      .populate('userId', 'name email phone');
+      .populate('userId', 'name email phone')
+      .populate('items.productId', 'name image price');
 
     if (!order) {
       return res.status(404).json({ 
@@ -302,10 +227,10 @@ const getOrderById = async (req, res) => {
       });
     }
 
-    // 🔥 UPDATED: Allow admin to view any order
+    // 🔥 Check permission: Admin or owner (user) or guest with matching phone
     const isAdmin = req.role === 'admin' || req.isAdmin;
-    const isOwner = order.userId._id.toString() === req.userId;
-
+    const isOwner = order.userId && order.userId._id.toString() === req.userId;
+    
     if (!isAdmin && !isOwner) {
       return res.status(403).json({ 
         success: false, 
@@ -319,6 +244,7 @@ const getOrderById = async (req, res) => {
       success: true,
       order
     });
+
   } catch (error) {
     console.error('❌ Get order error:', error);
     res.status(500).json({ 
@@ -329,57 +255,65 @@ const getOrderById = async (req, res) => {
 };
 
 // =====================================
-// 4. GET ALL ORDERS (ADMIN)
+// 4. GET ALL ORDERS (Admin)
 // =====================================
+
 const getAllOrders = async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const { 
+      page = 1, 
+      limit = 20, 
+      status,
+      orderType 
+    } = req.query;
 
-    let query = {};
-    if (status) {
-      query.status = sanitizeString(status);
-    }
+    console.log('📦 Fetching all orders (admin)');
 
-    // 🔒 VALIDATE pagination
-    const validatedPage = Math.max(parseInt(page) || 1, 1);
-    const validatedLimit = Math.min(parseInt(limit) || 20, 100);
+    // Build filter
+    const filter = {};
+    if (status) filter.status = status;
+    if (orderType) filter.orderType = orderType;
 
-    const skip = (validatedPage - 1) * validatedLimit;
-    
-    const orders = await Order.find(query)
+    // Execute query
+    const orders = await Order.find(filter)
+      .sort('-createdAt')
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit))
       .populate('userId', 'name email phone')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(validatedLimit);
+      .populate('items.productId', 'name image price');
 
-    const total = await Order.countDocuments(query);
+    const total = await Order.countDocuments(filter);
+
+    console.log(`✅ Found ${orders.length} orders`);
 
     res.json({
       success: true,
       orders,
       pagination: {
         total,
-        page: validatedPage,
-        pages: Math.ceil(total / validatedLimit)
+        page: Number(page),
+        pages: Math.ceil(total / Number(limit)),
+        limit: Number(limit)
       }
     });
+
   } catch (error) {
     console.error('❌ Get all orders error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Lỗi khi lấy danh sách đơn hàng' 
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy danh sách đơn hàng'
     });
   }
 };
 
 // =====================================
-// 5. UPDATE ORDER STATUS (ADMIN)
+// 5. UPDATE ORDER STATUS (Admin)
 // =====================================
+
 const updateOrderStatus = async (req, res) => {
   try {
-    // 🔒 SANITIZE status
-    const status = sanitizeString(req.body.status);
-    
+    const { status } = req.body;
+
     const validStatuses = ['pending', 'confirmed', 'shipping', 'delivered', 'cancelled'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
@@ -389,42 +323,37 @@ const updateOrderStatus = async (req, res) => {
     }
 
     const order = await Order.findById(req.params.id);
-    
+
     if (!order) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Không tìm thấy đơn hàng' 
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy đơn hàng'
       });
     }
 
     order.status = status;
 
-    if (status === 'delivered') {
-      order.deliveredAt = Date.now();
-      if (order.paymentMethod === 'COD') {
-        order.isPaid = true;
-        order.paidAt = Date.now();
-      }
-    }
-
-    if (status === 'cancelled') {
-      order.cancelledAt = Date.now();
-    }
+    // Set timestamp based on status
+    if (status === 'confirmed') order.confirmedAt = Date.now();
+    if (status === 'shipping') order.shippedAt = Date.now();
+    if (status === 'delivered') order.deliveredAt = Date.now();
+    if (status === 'cancelled') order.cancelledAt = Date.now();
 
     await order.save();
 
-    console.log('✅ Order status updated:', order._id, '→', status);
+    console.log(`✅ Order status updated: ${order._id} → ${status}`);
 
     res.json({
       success: true,
-      message: 'Cập nhật trạng thái đơn hàng thành công',
+      message: 'Cập nhật trạng thái thành công',
       order
     });
+
   } catch (error) {
     console.error('❌ Update order status error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Lỗi khi cập nhật trạng thái đơn hàng' 
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi cập nhật trạng thái'
     });
   }
 };
@@ -432,101 +361,76 @@ const updateOrderStatus = async (req, res) => {
 // =====================================
 // 6. CANCEL ORDER
 // =====================================
+
 const cancelOrder = async (req, res) => {
   try {
+    const { cancelReason } = req.body;
+
     const order = await Order.findById(req.params.id);
 
     if (!order) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Không tìm thấy đơn hàng' 
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy đơn hàng'
       });
     }
 
-    // 🔒 CHECK AUTHORIZATION
-    if (order.userId.toString() !== req.userId && req.role !== 'admin') {
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Bạn không có quyền hủy đơn hàng này' 
+    // Check permission
+    const isAdmin = req.role === 'admin' || req.isAdmin;
+    const isOwner = order.userId && order.userId.toString() === req.userId;
+
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn không có quyền hủy đơn hàng này'
       });
     }
 
-    if (['delivered', 'cancelled'].includes(order.status)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Không thể hủy đơn hàng này' 
-      });
-    }
-
+    // Can only cancel pending or confirmed orders
     if (!['pending', 'confirmed'].includes(order.status)) {
       return res.status(400).json({
         success: false,
-        message: 'Chỉ có thể hủy đơn hàng đang chờ xác nhận hoặc đã xác nhận'
+        message: 'Không thể hủy đơn hàng đang giao hoặc đã giao'
       });
     }
 
+    // Update order
+    order.status = 'cancelled';
+    order.cancelledAt = Date.now();
+    order.cancelReason = cancelReason || 'Khách hàng yêu cầu hủy';
+
+    await order.save();
+
     // Restore stock
-    for (let item of order.items) {
-      // 🔥 FIX: Handle both ObjectId and Number productId
-      let product = null;
+    for (const item of order.items) {
+      let product;
       
-      // Try finding by _id (ObjectId) first
       if (mongoose.Types.ObjectId.isValid(item.productId)) {
-        product = await Product.findOne({ 
-          _id: item.productId,
-          isActive: true 
-        });
-      }
-      
-      // Fallback: Try productId (Number)
-      if (!product && !isNaN(item.productId)) {
-        product = await Product.findOne({ 
-          productId: Number(item.productId),
-          isActive: true 
-        });
-      }
-      
-      // Last resort: Try name
-      if (!product && item.name) {
-        product = await Product.findOne({ 
-          name: item.name,
-          isActive: true 
-        });
+        product = await Product.findById(item.productId);
+      } else {
+        product = await Product.findOne({ productId: item.productId });
       }
 
-      if (product && product.stock !== undefined) {
-        const oldStock = product.stock;
-        
-        await Product.findByIdAndUpdate(
-          product._id,
-          {
-            $inc: { 
-              stock: item.quantity,
-              soldCount: -item.quantity
-            }
-          }
-        );
-        
-        console.log(`📈 ${product.name}: ${oldStock} → ${oldStock + item.quantity}`);
+      if (product) {
+        product.stock += item.quantity;
+        await product.save();
+        console.log(`📈 Restored stock: ${product.name} +${item.quantity}`);
       }
     }
 
-    order.status = 'cancelled';
-    order.cancelledAt = Date.now();
-    await order.save();
-
-    console.log('✅ Order cancelled:', order._id);
+    console.log(`✅ Order cancelled: ${order._id}`);
 
     res.json({
       success: true,
-      message: 'Hủy đơn hàng thành công',
+      message: 'Đơn hàng đã được hủy',
       order
     });
+
   } catch (error) {
     console.error('❌ Cancel order error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Lỗi khi hủy đơn hàng' 
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi hủy đơn hàng'
     });
   }
 };
