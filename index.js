@@ -12,12 +12,18 @@ const { verifyEmailConfig } = require('./src/services/emailService');
 
 const app = express();
 const port = process.env.PORT || 5000;
+// =========================================
+// 1. TRUST PROXY (MUST BE FIRST!)
+// =========================================
+setupTrustProxy(app); // 🔥 Add this BEFORE setupSecurity
 
 // =========================================
-// 1. SECURITY MIDDLEWARE (MUST BE FIRST)
+// 2. SECURITY MIDDLEWARE
 // =========================================
 console.log('🔒 Initializing security...');
 setupSecurity(app);
+
+
 
 // =========================================
 // 2. COOKIE PARSER (BEFORE ROUTES)
@@ -303,10 +309,16 @@ process.on('unhandledRejection', (err) => {
     console.log('🔄 Closing server gracefully...');
     server.close(() => {
       console.log('💤 Server closed');
-      mongoose.connection.close(false, () => {
-        console.log('💤 MongoDB connection closed');
-        process.exit(1);
-      });
+      // 🔥 FIX: Remove callback from mongoose close()
+      mongoose.connection.close()
+        .then(() => {
+          console.log('💤 MongoDB connection closed');
+          process.exit(1);
+        })
+        .catch((err) => {
+          console.error('❌ Error closing MongoDB:', err);
+          process.exit(1);
+        });
     });
   } else {
     process.exit(1);
