@@ -2,38 +2,50 @@
 const mongoose = require('mongoose');
 
 const orderSchema = new mongoose.Schema({
+  // 🔥 USER ID - Optional now (for guest checkout)
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
+    required: false  // 🔥 Changed from true to false
   },
+  
+  // 🔥 NEW: Guest information (if no userId)
+  guestInfo: {
+    name: {
+      type: String,
+      required: function() {
+        return !this.userId; // Required if no userId
+      }
+    },
+    phone: {
+      type: String,
+      required: function() {
+        return !this.userId;
+      }
+    },
+    email: {
+      type: String,
+      required: false
+    }
+  },
+  
   items: [{
     productId: {
-      type: mongoose.Schema.Types.ObjectId, // 🔥 FIXED: ObjectId thay vì Number
+      type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',
       required: true
     },
-    name: {
-      type: String,
-      required: true
-    },
-    price: {
-      type: Number,
-      required: true
-    },
+    name: String,
+    price: Number,
     quantity: {
       type: Number,
       required: true,
       min: 1
     },
-    size: {
-      type: String,
-      default: 'M'
-    },
-    image: {
-      type: String
-    }
+    size: String,
+    image: String
   }],
+  
   shippingAddress: {
     fullName: {
       type: String,
@@ -43,97 +55,89 @@ const orderSchema = new mongoose.Schema({
       type: String,
       required: true
     },
-    email: {
-      type: String
-    },
+    email: String,
     address: {
       type: String,
       required: true
     },
-    ward: {
-      type: String
-    },
-    district: {
-      type: String
-    },
-    city: {
-      type: String
-    }
+    ward: String,
+    district: String,
+    city: String
   },
+  
   paymentMethod: {
     type: String,
     enum: ['COD', 'BANK', 'CARD', 'MOMO', 'ZALOPAY'],
     default: 'COD'
   },
+  
   paymentStatus: {
     type: String,
     enum: ['pending', 'paid', 'failed'],
     default: 'pending'
   },
-  isPaid: {
-    type: Boolean,
-    default: false
-  },
-  paidAt: {
-    type: Date
-  },
+  
+  isPaid: Boolean,
+  paidAt: Date,
+  
   subtotal: {
     type: Number,
     required: true,
     default: 0
   },
+  
   shippingFee: {
     type: Number,
     default: 30000
   },
+  
   totalAmount: {
     type: Number,
     required: true
   },
+  
   note: {
     type: String,
     maxlength: 1000
   },
+  
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'shipping', 'delivered', 'cancelled'],
     default: 'pending'
   },
-  confirmedAt: {
-    type: Date
-  },
-  shippedAt: {
-    type: Date
-  },
-  deliveredAt: {
-    type: Date
-  },
-  cancelledAt: {
-    type: Date
-  },
-  cancelReason: {
+  
+  // 🔥 NEW: Order type
+  orderType: {
     type: String,
-    maxlength: 500
-  }
+    enum: ['user', 'guest'],
+    default: function() {
+      return this.userId ? 'user' : 'guest';
+    }
+  },
+  
+  confirmedAt: Date,
+  shippedAt: Date,
+  deliveredAt: Date,
+  cancelledAt: Date,
+  cancelReason: String
+  
 }, {
   timestamps: true
 });
 
-// 🔒 INDEXES
+// Indexes
 orderSchema.index({ userId: 1, createdAt: -1 });
+orderSchema.index({ 'guestInfo.phone': 1 }); // 🔥 NEW: Index for guest lookup
 orderSchema.index({ status: 1 });
-orderSchema.index({ 'items.productId': 1 });
 orderSchema.index({ createdAt: -1 });
 
-// 🔒 VIRTUAL: orderNumber
+// Virtual: orderNumber
 orderSchema.virtual('orderNumber').get(function() {
   return this._id.toString().slice(-8).toUpperCase();
 });
 
-// 🔒 Convert to JSON with virtuals
 orderSchema.set('toJSON', { virtuals: true });
 orderSchema.set('toObject', { virtuals: true });
 
-const Order = mongoose.model('Order', orderSchema);
-
-module.exports = Order;
+module.exports = mongoose.model('Order', orderSchema);
