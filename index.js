@@ -300,7 +300,6 @@ startServer();
 // 10. PROCESS EVENT HANDLERS
 // =========================================
 
-// Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
   console.error('\n❌ Unhandled Promise Rejection:', err.message);
   console.error('Stack:', err.stack);
@@ -333,11 +332,17 @@ process.on('SIGTERM', () => {
     server.close(() => {
       console.log('💤 HTTP server closed');
       
-      mongoose.connection.close(false, () => {
-        console.log('💤 MongoDB connection closed');
-        console.log('✅ Graceful shutdown complete\n');
-        process.exit(0);
-      });
+      // 🔥 FIX: Remove callback from mongoose close()
+      mongoose.connection.close()
+        .then(() => {
+          console.log('💤 MongoDB connection closed');
+          console.log('✅ Graceful shutdown complete\n');
+          process.exit(0);
+        })
+        .catch((err) => {
+          console.error('❌ Error closing MongoDB:', err);
+          process.exit(1);
+        });
     });
     
     // Force shutdown after 30 seconds
@@ -358,11 +363,17 @@ process.on('SIGINT', () => {
     server.close(() => {
       console.log('💤 HTTP server closed');
       
-      mongoose.connection.close(false, () => {
-        console.log('💤 MongoDB connection closed');
-        console.log('✅ Graceful shutdown complete\n');
-        process.exit(0);
-      });
+      // 🔥 FIX: Remove callback from mongoose close()
+      mongoose.connection.close()
+        .then(() => {
+          console.log('💤 MongoDB connection closed');
+          console.log('✅ Graceful shutdown complete\n');
+          process.exit(0);
+        })
+        .catch((err) => {
+          console.error('❌ Error closing MongoDB:', err);
+          process.exit(1);
+        });
     });
   } else {
     process.exit(0);
