@@ -1,7 +1,7 @@
 // backend/src/products/product.route.js
 const express = require('express');
 const router = express.Router();
-const mongoose = require('mongoose'); // 🔥 ADD THIS IMPORT
+const mongoose = require('mongoose');
 const Product = require('./product.model');
 const { verifyAdminToken } = require('../middleware/verifyAdminToken');
 
@@ -75,7 +75,78 @@ router.get('/', async (req, res) => {
   }
 });
 
-// 🔥 GET SINGLE PRODUCT - Accept both ObjectId and productId
+// 🔥 GET CATEGORIES (MUST BE BEFORE /:id to avoid conflict)
+router.get('/categories/all', async (req, res) => {
+  try {
+    const categories = await Product.distinct('category', { isActive: true });
+
+    res.json({
+      success: true,
+      categories: categories.filter(Boolean) // Remove null/undefined
+    });
+
+  } catch (error) {
+    console.error('❌ Get categories error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy danh mục'
+    });
+  }
+});
+
+// 🔥 NEW: GET RELATED PRODUCTS (MUST BE BEFORE /:id)
+router.get('/:id/related', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const limit = Number(req.query.limit) || 4;
+
+    console.log('🔗 Fetching related products for:', id);
+
+    // First, find the current product to get its category
+    let currentProduct;
+    
+    if (mongoose.Types.ObjectId.isValid(id) && id.length === 24) {
+      currentProduct = await Product.findOne({ _id: id, isActive: true });
+    } else if (!isNaN(id)) {
+      currentProduct = await Product.findOne({ productId: Number(id), isActive: true });
+    }
+
+    if (!currentProduct) {
+      console.log('❌ Current product not found');
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy sản phẩm'
+      });
+    }
+
+    // Find related products (same category, exclude current product)
+    const relatedProducts = await Product.find({
+      category: currentProduct.category,
+      _id: { $ne: currentProduct._id }, // Exclude current product
+      isActive: true
+    })
+      .limit(limit)
+      .select('-__v')
+      .sort('-createdAt');
+
+    console.log(`✅ Found ${relatedProducts.length} related products`);
+
+    res.json({
+      success: true,
+      products: relatedProducts,
+      total: relatedProducts.length
+    });
+
+  } catch (error) {
+    console.error('❌ Get related products error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Lỗi khi lấy sản phẩm liên quan'
+    });
+  }
+});
+
+// 🔥 GET SINGLE PRODUCT (MUST BE AFTER specific routes like /:id/related)
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -267,25 +338,6 @@ router.delete('/:id', verifyAdminToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Lỗi khi xóa sản phẩm'
-    });
-  }
-});
-
-// 🔥 GET CATEGORIES
-router.get('/categories/all', async (req, res) => {
-  try {
-    const categories = await Product.distinct('category', { isActive: true });
-
-    res.json({
-      success: true,
-      categories: categories.filter(Boolean) // Remove null/undefined
-    });
-
-  } catch (error) {
-    console.error('❌ Get categories error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Lỗi khi lấy danh mục'
     });
   }
 });
